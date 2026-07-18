@@ -1,34 +1,22 @@
-# Translator 快速翻译（Chrome MV3 扩展）
+# Anwara Translator（Chrome / Edge MV3 扩展）
 
 <p align="center">
-  <img src="icon.png" alt="Translator Extension Icon" width="128" />
+  <img src="icon.png" alt="Anwara Translator icon" width="128" />
 </p>
 
 <p align="center">
-  <a href="https://translation.run/">🌐 官方网站</a> |
-  <a href="https://chromewebstore.google.com/detail/hlckjpmehcjcldpaamdcegocapmelegc">🛍️ Chrome 商店</a> |
-  <a href="https://github.com/AnYi-0/Translator">💻 源代码</a>
+  <a href="https://github.com/salimongo/Anwara-Translator">项目仓库</a> |
+  <a href="https://github.com/salimongo/Anwara-Translator/issues">Issues</a> |
+  <a href="https://github.com/salimongo/Anwara-Translator/releases">Releases</a>
 </p>
 
+Anwara Translator 是一个基于浏览器内置 Translator API 与 Language Detector API 的本地翻译扩展，支持文本、网页和选句翻译，并提供双语面板、历史记录与阅读区。翻译在本地完成，首次使用可能需要下载浏览器模型。
 
-一个基于 Chrome 138+ 新增的本地 Translator API 和 Language Detector API 的离线轻量级翻译扩展，支持自动检测网页语言、自动翻译网页、离线翻译（首次可能需下载模型）、快速出结果。
+## 下载与安装
 
-## 下载地址
-
-[![Chrome 商店](https://img.shields.io/chrome-web-store/v/hlckjpmehcjcldpaamdcegocapmelegc?style=for-the-badge&logo=googlechrome&logoColor=white&label=Chrome%20商店&color=4285F4)](https://chromewebstore.google.com/detail/hlckjpmehcjcldpaamdcegocapmelegc)
-[![GitHub release](https://img.shields.io/github/v/release/AnYi-0/Translator?style=for-the-badge&logo=github&label=GitHub%20Release)](https://github.com/AnYi-0/Translator/releases/latest)
-
-- **[Chrome 网上应用商店](https://chromewebstore.google.com/detail/hlckjpmehcjcldpaamdcegocapmelegc)** (推荐)
-- **[GitHub Releases](https://github.com/AnYi-0/Translator/releases/)** (下载 `.zip` 文件手动安装)
-
-## 官方网站
-
-访问 **[https://translation.run/](https://translation.run/)** 了解更多信息，包括：
-- 📖 详细使用教程
-- 🚀 最新功能介绍  
-- 💬 用户反馈与支持
-- 📥 快速下载链接
-
+- **[GitHub Releases](https://github.com/salimongo/Anwara-Translator/releases/)**：下载发布包。
+- **Chrome / Edge 开发者模式**：打开扩展管理页，加载解压后的项目文件夹。
+- **问题反馈**：提交到 [Issues](https://github.com/salimongo/Anwara-Translator/issues)。
 
 ## 特性
 - 自动检测来源语言（LanguageDetector）
@@ -40,11 +28,16 @@
 - 支持自动/手动翻译当前网页
 - 一比一还原Google原生网页翻译
 - 选中任意文本即可自动翻译
+- 选中文本后在选区边缘显示红点，悬停或点击红点展开译文面板，并保留复制按钮
+- 翻译面板可通过顶部手柄拖动，位置按网站记忆，避免遮挡页面内容
+- 保留译文中的段落、换行和缩进排版，避免多行内容粘成一块
+- 划词面板支持固定、多开、拖动和调整大小，布局按网站记忆
+- 成功翻译默认写入本地历史，可单独加入阅读区并批量清理
 - 增加漂浮翻译开关
-- ✨ **增加网址白名单功能**： 增加网址白名单功能，如果开启自动翻译网页功能，则不会自动翻译白名单内的网址。（V1.5.0新增功能）
+- ✨ **网址白名单功能**：开启自动翻译网页后，可跳过白名单内的网址。
 
 ## 运行要求
-- Chrome 版本：138+（支持 Translator 与 LanguageDetector）
+- Chrome 或 Edge 版本：138+（支持 Translator 与 LanguageDetector）
 
 ## 安装与加载（开发者模式）
 1. 打开 Chrome 地址栏：chrome://extensions
@@ -79,8 +72,8 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 Translator 是开源软件。我们尊重您的隐私权。我们不会采集您的任何数据，所有数据均在您的本地进行使用，不会将您的数据提供给任何人。
 
-当然，您不必听信我们的一家之言。您可以通过阅读源代码来了解 Translator(https://github.com/AnYi-0/Translator/) 的具体行为，或者咨询该方面的专业人士。
+当然，您不必听信我们的一家之言。您可以通过阅读源代码来了解 Anwara Translator(https://github.com/salimongo/Anwara-Translator/) 的具体行为，或者咨询该方面的专业人士。
 
 Translator is open source software. We respect your privacy rights. We will not collect any data from you, all data will be used locally, and your data will not be provided to anyone.
 
-Of course, you don't have to listen to our family. You can read the source code to learn about the specific behavior of Translator(https://github.com/AnYi-0/Translator/), or consult a professional in the field.
+Of course, you don't have to listen to our family. You can read the source code to learn about the specific behavior of Anwara Translator(https://github.com/salimongo/Anwara-Translator/), or consult a professional in the field.

@@ -14,9 +14,16 @@ const speakBtn = document.getElementById("speakBtn");
 const autoToggle = document.getElementById("autoToggle");
 const selectionToggle = document.getElementById("selectionToggle");
 const floatingToggle = document.getElementById("floatingToggle");
+const selectionBilingualToggle = document.getElementById("selectionBilingualToggle");
+const selectionSourceToggle = document.getElementById("selectionSourceToggle");
 const autoToggleStatus = document.getElementById("autoToggleStatus");
 const selectionToggleStatus = document.getElementById("selectionToggleStatus");
 const floatingToggleStatus = document.getElementById("floatingToggleStatus");
+const selectionBilingualToggleStatus = document.getElementById("selectionBilingualToggleStatus");
+const selectionSourceToggleStatus = document.getElementById("selectionSourceToggleStatus");
+
+const SELECTION_SHOW_BILINGUAL_KEY = 'translatorSelectionShowBilingual';
+const SELECTION_SHOW_SOURCE_KEY = 'translatorSelectionShowSource';
 
 const manualPageBtn = document.getElementById("manualPageBtn");
 const restorePageBtn = document.getElementById("restorePageBtn");
@@ -33,6 +40,423 @@ const emptyWhitelist = document.getElementById("emptyWhitelist");
 
 
 const downloadSection = document.getElementById("downloadSection");
+const historyEnabledToggle = document.getElementById('historyEnabledToggle');
+const autoReadingToggle = document.getElementById('autoReadingToggle');
+const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
+const historyManageBtn = document.getElementById('historyManageBtn');
+const historyTools = document.getElementById('historyTools');
+const historyViewSelect = document.getElementById('historyViewSelect');
+const historySelectAllBtn = document.getElementById('historySelectAllBtn');
+const historyFromDate = document.getElementById('historyFromDate');
+const historyToDate = document.getElementById('historyToDate');
+const deleteSelectedHistoryBtn = document.getElementById('deleteSelectedHistoryBtn');
+const deleteDateHistoryBtn = document.getElementById('deleteDateHistoryBtn');
+const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+const historyStatus = document.getElementById('historyStatus');
+const historyList = document.getElementById('historyList');
+const HISTORY_KEY = 'translatorHistory';
+const HISTORY_ENABLED_KEY = 'translatorHistoryEnabled';
+const AUTO_READING_KEY = 'translatorAutoAddToReading';
+let historyItems = [];
+const archiveTabs = Array.from(document.querySelectorAll('.archive-tab'));
+const readerModeTabs = Array.from(document.querySelectorAll('.reader-mode-tab'));
+const historySection = document.getElementById('historySection');
+const readerSection = document.getElementById('readerSection');
+const readerBackBtn = document.getElementById('readerBackBtn');
+const readerTitle = document.getElementById('readerTitle');
+const readerContent = document.getElementById('readerContent');
+const readerAlignmentStatus = document.getElementById('readerAlignmentStatus');
+const readerFontDecreaseBtn = document.getElementById('readerFontDecreaseBtn');
+const readerFontIncreaseBtn = document.getElementById('readerFontIncreaseBtn');
+const readerFontSizeLabel = document.getElementById('readerFontSizeLabel');
+let activeReaderItem = null;
+let readerReturnView = 'reading';
+let readerFontSize = 17;
+let readerMode = 'dual';
+
+function syncArchiveTabs(view) {
+  const activeView = view === 'reading' ? 'reading' : 'all';
+  if (historyViewSelect) historyViewSelect.value = activeView;
+  archiveTabs.forEach((tab) => {
+    const isActive = tab.dataset.historyView === activeView;
+    tab.classList.toggle('is-active', isActive);
+    tab.setAttribute('aria-selected', String(isActive));
+  });
+}
+
+function setHistoryToolsOpen(open) {
+  const isOpen = Boolean(open);
+  historyTools?.classList.toggle('hidden', !isOpen);
+  historyManageBtn?.setAttribute('aria-expanded', String(isOpen));
+  if (historyManageBtn) historyManageBtn.textContent = isOpen ? '收起' : '管理';
+}
+
+function splitReaderUnits(text) {
+  const normalized = String(text || '').replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return [];
+  return normalized
+    .split(/\n+|(?<=[。！？!?；;])\s*|(?<=[.!?])\s+(?=[A-Z0-9])/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function getReaderPairs(item) {
+  const sourceUnits = splitReaderUnits(item.sourceText);
+  const translatedUnits = splitReaderUnits(item.translatedText);
+  const aligned = sourceUnits.length > 1 && sourceUnits.length === translatedUnits.length;
+  if (aligned) {
+    return {
+      aligned: true,
+      pairs: sourceUnits.map((source, index) => ({ source, translated: translatedUnits[index] }))
+    };
+  }
+  return {
+    aligned: false,
+    pairs: [{ source: String(item.sourceText || '').trim(), translated: String(item.translatedText || '').trim() }]
+  };
+}
+
+function renderReaderContent() {
+  if (!activeReaderItem || !readerContent) return;
+  const { aligned, pairs } = getReaderPairs(activeReaderItem);
+  readerContent.textContent = '';
+  readerContent.style.fontSize = `${readerFontSize}px`;
+  if (readerFontSizeLabel) readerFontSizeLabel.textContent = String(readerFontSize);
+  if (readerAlignmentStatus) {
+    readerAlignmentStatus.textContent = aligned
+      ? '已按句子启发式对齐；原文和译文来自同一条历史记录。'
+      : '当前记录无法可靠逐句对齐，已退回整段双语显示。';
+  }
+
+  for (const pair of pairs) {
+    if (readerMode === 'dual') {
+      const block = document.createElement('div');
+      block.className = 'reader-pair';
+      const source = document.createElement('div');
+      source.className = 'reader-source';
+      source.textContent = pair.source;
+      const translated = document.createElement('div');
+      translated.className = 'reader-translated';
+      translated.textContent = pair.translated;
+      block.appendChild(source);
+      block.appendChild(translated);
+      readerContent.appendChild(block);
+    } else {
+      const block = document.createElement('div');
+      block.className = 'reader-single';
+      block.textContent = readerMode === 'source' ? pair.source : pair.translated;
+      readerContent.appendChild(block);
+    }
+  }
+}
+
+function openReader(item, returnView = historyViewSelect?.value || 'reading') {
+  activeReaderItem = item;
+  readerReturnView = returnView === 'all' ? 'all' : 'reading';
+  syncArchiveTabs('reading');
+  if (historySection) historySection.classList.add('reader-open');
+  readerSection?.classList.remove('hidden');
+  if (readerTitle) readerTitle.textContent = item.pageTitle || item.pageUrl || '未命名记录';
+  if (readerBackBtn) readerBackBtn.textContent = readerReturnView === 'all' ? '返回历史' : '返回阅读区';
+  renderReaderContent();
+  readerSection?.scrollIntoView?.({ block: 'nearest' });
+}
+
+function closeReader() {
+  activeReaderItem = null;
+  setHistoryToolsOpen(false);
+  historySection?.classList.remove('reader-open');
+  readerSection?.classList.add('hidden');
+  if (readerContent) readerContent.textContent = '';
+}
+
+function closeReaderAndReturn() {
+  const returnView = readerReturnView;
+  closeReader();
+  setHistoryView(returnView);
+}
+
+function setHistoryView(view) {
+  closeReader();
+  syncArchiveTabs(view);
+  renderHistoryList();
+}
+
+function setReaderMode(mode) {
+  readerMode = ['dual', 'source', 'translated'].includes(mode) ? mode : 'dual';
+  readerModeTabs.forEach((tab) => {
+    const isActive = tab.dataset.readerMode === readerMode;
+    tab.classList.toggle('is-active', isActive);
+    tab.setAttribute('aria-selected', String(isActive));
+  });
+  renderReaderContent();
+}
+
+function adjustReaderFont(delta) {
+  readerFontSize = Math.max(13, Math.min(28, readerFontSize + delta));
+  renderReaderContent();
+}
+
+function setHistoryStatus(message, kind = '') {
+  if (!historyStatus) return;
+  historyStatus.textContent = message;
+  historyStatus.style.color = kind === 'err' ? '#b91c1c' : kind === 'ok' ? '#047857' : 'var(--muted)';
+}
+
+function formatHistoryTime(timestamp) {
+  try {
+    return new Date(timestamp).toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch {
+    return '';
+  }
+}
+
+function getFilteredHistoryItems() {
+  const view = historyViewSelect?.value || 'all';
+  const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
+  const to = historyToDate?.value ? new Date(`${historyToDate.value}T23:59:59.999`).getTime() : null;
+  return historyItems.filter((item) => {
+    if (view === 'reading' && !item.inReadingArea) return false;
+    if (from !== null && item.createdAt < from) return false;
+    if (to !== null && item.createdAt > to) return false;
+    return true;
+  });
+}
+
+function createHistoryButton(label, action, id) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'history-action btn';
+  button.textContent = label;
+  button.dataset.action = action;
+  button.dataset.id = id;
+  button.style.cssText = 'width:auto;padding:4px 6px;font-size:10px;background:#fff;border:1px solid #dbe2ea;color:#475569;border-radius:6px;white-space:nowrap;';
+  return button;
+}
+
+function renderHistoryList() {
+  if (!historyList) return;
+  historyList.textContent = '';
+  const visibleItems = getFilteredHistoryItems();
+  if (!visibleItems.length) {
+    const empty = document.createElement('div');
+    empty.className = 'small';
+    empty.textContent = '暂无符合条件的历史翻译';
+    empty.style.cssText = 'padding:14px;text-align:center;color:var(--muted);';
+    historyList.appendChild(empty);
+    setHistoryStatus(`共 ${historyItems.length} 条记录`);
+    return;
+  }
+
+  for (const item of visibleItems) {
+    const card = document.createElement('div');
+    card.className = 'history-card';
+    card.style.cssText = 'padding:8px;margin-bottom:6px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;';
+
+    const header = document.createElement('div');
+    header.className = 'history-card-header';
+    header.style.cssText = 'display:flex;align-items:flex-start;gap:6px;';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'history-select';
+    checkbox.dataset.id = item.id;
+    checkbox.style.cssText = 'margin-top:3px;';
+    header.appendChild(checkbox);
+
+    const body = document.createElement('div');
+    body.className = 'history-card-body';
+    body.style.cssText = 'min-width:0;flex:1;';
+    const source = document.createElement('div');
+    source.className = 'history-card-source';
+    source.textContent = item.sourceText || '';
+    source.title = item.sourceText || '';
+    source.style.cssText = 'font-size:11px;line-height:1.4;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere;max-height:58px;overflow:auto;';
+    const translated = document.createElement('div');
+    translated.className = 'history-card-translated';
+    translated.textContent = item.translatedText || '';
+    translated.title = item.translatedText || '';
+    translated.style.cssText = 'margin-top:4px;font-size:11px;line-height:1.45;color:#0f766e;white-space:pre-wrap;overflow-wrap:anywhere;max-height:72px;overflow:auto;';
+    const meta = document.createElement('div');
+    meta.className = 'history-card-meta';
+    meta.textContent = `${formatHistoryTime(item.createdAt)} · ${item.pageTitle || item.pageUrl || ''}${item.inReadingArea ? ' · 阅读区' : ''}`;
+    meta.style.cssText = 'margin-top:5px;font-size:10px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    body.appendChild(source);
+    body.appendChild(translated);
+    body.appendChild(meta);
+    header.appendChild(body);
+    card.appendChild(header);
+
+    const actions = document.createElement('div');
+    actions.className = 'history-card-actions';
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:5px;margin-top:6px;';
+    actions.appendChild(createHistoryButton(item.inReadingArea ? '移出阅读区' : '加入阅读区', 'reading', item.id));
+    actions.appendChild(createHistoryButton('展开阅读', 'reader', item.id));
+    actions.appendChild(createHistoryButton('删除', 'delete', item.id));
+    card.appendChild(actions);
+    historyList.appendChild(card);
+  }
+  setHistoryStatus(`显示 ${visibleItems.length} 条，共 ${historyItems.length} 条记录`);
+}
+
+async function loadHistoryState() {
+  try {
+    const result = await chrome.storage.local.get([HISTORY_KEY, HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
+    historyItems = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
+    if (historyEnabledToggle) historyEnabledToggle.checked = result[HISTORY_ENABLED_KEY] !== false;
+    if (autoReadingToggle) autoReadingToggle.checked = result[AUTO_READING_KEY] === true;
+    renderHistoryList();
+  } catch (e) {
+    historyItems = [];
+    setHistoryStatus('历史记录读取失败', 'err');
+  }
+}
+
+async function saveHistoryItems() {
+  await chrome.storage.local.set({ [HISTORY_KEY]: historyItems });
+  renderHistoryList();
+}
+
+async function recordManualTranslationHistory(sourceText, translatedText, sourceLang, targetLang) {
+  try {
+    const settings = await chrome.storage.local.get([HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
+    if (settings[HISTORY_ENABLED_KEY] === false) return;
+    const result = await chrome.storage.local.get([HISTORY_KEY]);
+    const stored = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
+    stored.unshift({
+      id: `translation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sourceText: String(sourceText || '').replace(/\r\n?/g, '\n'),
+      translatedText: String(translatedText || '').replace(/\r\n?/g, '\n'),
+      sourceLang: sourceLang || 'auto',
+      targetLang: targetLang || 'zh-Hans',
+      pageUrl: '',
+      pageTitle: '主功能区翻译',
+      createdAt: Date.now(),
+      inReadingArea: settings[AUTO_READING_KEY] === true
+    });
+    stored.splice(500);
+    historyItems = stored;
+    await chrome.storage.local.set({ [HISTORY_KEY]: stored });
+    renderHistoryList();
+  } catch (e) {
+    console.warn('保存主功能区翻译历史失败:', e);
+  }
+}
+
+function getSelectedHistoryIds() {
+  return new Set(Array.from(historyList?.querySelectorAll('.history-select:checked') || []).map((el) => el.dataset.id));
+}
+
+historyList?.addEventListener('click', async (event) => {
+  const button = event.target.closest?.('button[data-action]');
+  if (!button) return;
+  const id = button.dataset.id;
+  const index = historyItems.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  if (button.dataset.action === 'delete') {
+    historyItems.splice(index, 1);
+    await saveHistoryItems();
+    setHistoryStatus('已删除 1 条历史翻译', 'ok');
+  } else if (button.dataset.action === 'reading') {
+    historyItems[index].inReadingArea = !historyItems[index].inReadingArea;
+    await saveHistoryItems();
+    setHistoryStatus(historyItems[index].inReadingArea ? '已加入阅读区' : '已移出阅读区', 'ok');
+  } else if (button.dataset.action === 'reader') {
+    openReader(historyItems[index], historyViewSelect?.value || 'all');
+  }
+});
+
+refreshHistoryBtn?.addEventListener('click', loadHistoryState);
+historyManageBtn?.addEventListener('click', () => setHistoryToolsOpen(historyTools?.classList.contains('hidden')));
+historyViewSelect?.addEventListener('change', () => setHistoryView(historyViewSelect.value));
+archiveTabs.forEach((tab) => {
+  tab.addEventListener('click', () => setHistoryView(tab.dataset.historyView));
+});
+readerModeTabs.forEach((tab) => {
+  tab.addEventListener('click', () => setReaderMode(tab.dataset.readerMode));
+});
+readerBackBtn?.addEventListener('click', closeReaderAndReturn);
+readerFontDecreaseBtn?.addEventListener('click', () => adjustReaderFont(-1));
+readerFontIncreaseBtn?.addEventListener('click', () => adjustReaderFont(1));
+historyFromDate?.addEventListener('change', renderHistoryList);
+historyToDate?.addEventListener('change', renderHistoryList);
+historySelectAllBtn?.addEventListener('click', () => {
+  historyList?.querySelectorAll('.history-select').forEach((input) => { input.checked = true; });
+});
+deleteSelectedHistoryBtn?.addEventListener('click', async () => {
+  const selected = getSelectedHistoryIds();
+  if (!selected.size) {
+    setHistoryStatus('请先选择要删除的记录', 'err');
+    return;
+  }
+  historyItems = historyItems.filter((item) => !selected.has(item.id));
+  await saveHistoryItems();
+  setHistoryStatus(`已删除 ${selected.size} 条历史翻译`, 'ok');
+});
+deleteDateHistoryBtn?.addEventListener('click', async () => {
+  const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
+  const to = historyToDate?.value ? new Date(`${historyToDate.value}T23:59:59.999`).getTime() : null;
+  if (from !== null && to !== null && from > to) {
+    setHistoryStatus('开始日期不能晚于结束日期', 'err');
+    return;
+  }
+  if (from === null && to === null) {
+    setHistoryStatus('请先选择日期范围', 'err');
+    return;
+  }
+  const before = historyItems.length;
+  historyItems = historyItems.filter((item) => {
+    if (from !== null && item.createdAt < from) return true;
+    if (to !== null && item.createdAt > to) return true;
+    return false;
+  });
+  const removed = before - historyItems.length;
+  if (removed && window.confirm(`确定删除日期范围内的 ${removed} 条记录吗？`)) {
+    await saveHistoryItems();
+    setHistoryStatus(`已删除 ${removed} 条历史翻译`, 'ok');
+  } else if (removed) {
+    await loadHistoryState();
+    setHistoryStatus('已取消删除');
+  } else {
+    setHistoryStatus('该日期范围没有记录');
+  }
+});
+clearHistoryBtn?.addEventListener('click', async () => {
+  if (!historyItems.length) {
+    closeReader();
+    setHistoryToolsOpen(false);
+    syncArchiveTabs('all');
+    renderHistoryList();
+    return;
+  }
+  if (!window.confirm(`确定清空全部 ${historyItems.length} 条历史翻译吗？`)) return;
+
+  const previousItems = historyItems;
+  historyItems = [];
+  closeReader();
+  setHistoryToolsOpen(false);
+  syncArchiveTabs('all');
+  try {
+    await chrome.storage.local.set({ [HISTORY_KEY]: [] });
+    renderHistoryList();
+    setHistoryStatus('历史翻译已清空', 'ok');
+  } catch (error) {
+    historyItems = previousItems;
+    renderHistoryList();
+    setHistoryStatus('清空历史翻译失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+historyEnabledToggle?.addEventListener('change', async () => {
+  await chrome.storage.local.set({ [HISTORY_ENABLED_KEY]: historyEnabledToggle.checked });
+  setHistoryStatus(historyEnabledToggle.checked ? '已开启历史记录' : '已关闭历史记录', 'ok');
+});
+autoReadingToggle?.addEventListener('change', async () => {
+  await chrome.storage.local.set({ [AUTO_READING_KEY]: autoReadingToggle.checked });
+  setHistoryStatus(autoReadingToggle.checked ? '新翻译会自动加入阅读区' : '新翻译不会自动加入阅读区', 'ok');
+});
+
 function updateCharCount() {
   if (!charCountEl) return;
   const len = inputEl.value.length;
@@ -632,6 +1056,9 @@ async function doTranslate() {
     outputEl.textContent = translation;
     const hasText = !!(translation && translation.trim());
     setCopyEnabled(hasText);
+    if (hasText) {
+      await recordManualTranslationHistory(text, translation, sourceLanguage, usedTarget);
+    }
 
     // 绑定朗读与复制按钮（若存在）
     // avoid duplicate listeners
@@ -688,10 +1115,19 @@ swapBtn?.addEventListener("click", () => {
 // 初始化：加载设置并同步 UI
 (async () => {
   try {
-    const s = await chrome.storage.sync.get(['autoTranslateEnabled', 'selectionTranslateEnabled', 'floatingButtonEnabled', 'autoTranslateTargetLang']);
+    const s = await chrome.storage.sync.get([
+      'autoTranslateEnabled',
+      'selectionTranslateEnabled',
+      'floatingButtonEnabled',
+      'autoTranslateTargetLang',
+      SELECTION_SHOW_BILINGUAL_KEY,
+      SELECTION_SHOW_SOURCE_KEY
+    ]);
     const autoEnabled = !!s.autoTranslateEnabled;
     const selectionEnabled = !!s.selectionTranslateEnabled;
     const floatingEnabled = !!s.floatingButtonEnabled;
+    const showBilingual = s[SELECTION_SHOW_BILINGUAL_KEY] !== false;
+    const showSource = s[SELECTION_SHOW_SOURCE_KEY] !== false;
 
     if (autoToggle) {
       autoToggle.checked = autoEnabled;
@@ -705,10 +1141,19 @@ swapBtn?.addEventListener("click", () => {
       floatingToggle.checked = floatingEnabled;
       updateToggleStatus(floatingToggle, floatingToggleStatus, floatingEnabled);
     }
+    if (selectionBilingualToggle) {
+      selectionBilingualToggle.checked = showBilingual;
+      updateToggleStatus(selectionBilingualToggle, selectionBilingualToggleStatus, showBilingual);
+    }
+    if (selectionSourceToggle) {
+      selectionSourceToggle.checked = showSource;
+      updateToggleStatus(selectionSourceToggle, selectionSourceToggleStatus, showSource);
+    }
     if (s.autoTranslateTargetLang) targetSelect.value = s.autoTranslateTargetLang;
     
-    // 加载白名单
+    // 加载白名单和历史翻译
     await loadWhitelist();
+    await loadHistoryState();
   } catch {}
 
   try {
@@ -781,28 +1226,59 @@ selectionToggle?.addEventListener('change', async (e) => {
   }
 });
 
-// 漂浮翻译按钮开关：持久化并通知content script
+// 确保当前标签页已经有内容脚本，返回漂浮按钮状态
+async function ensureFloatingButtonContentScript(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: 'QUERY_FLOATING_BUTTON' });
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+    return await chrome.tabs.sendMessage(tabId, { type: 'QUERY_FLOATING_BUTTON' });
+  }
+}
+
+// 漂浮翻译按钮开关：先确认页面可用，再持久化并通知 content script
 floatingToggle?.addEventListener('change', async (e) => {
   const enabled = !!e.target.checked;
-  await chrome.storage.sync.set({ floatingButtonEnabled: enabled });
-  updateToggleStatus(floatingToggle, floatingToggleStatus, enabled);
-  setStatus(enabled ? '已开启：漂浮翻译按钮' : '已关闭：漂浮翻译按钮', enabled ? 'ok' : '');
-
-  // 通知当前标签页的content script更新漂浮按钮状态
+  const previous = !enabled;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, {
-        type: 'TOGGLE_FLOATING_BUTTON',
-        enabled: enabled,
-        targetLang: targetSelect.value
-      });
+    if (!tab?.id) throw new Error('没有可操作的当前标签页');
+    await ensureFloatingButtonContentScript(tab.id);
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'TOGGLE_FLOATING_BUTTON',
+      enabled
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error || '页面没有确认漂浮按钮状态');
     }
-  } catch (e) {
-    // 忽略错误（可能是页面不支持或其他原因）
-    console.warn('Failed to notify content script about floating button toggle:', e);
+    await chrome.storage.sync.set({ floatingButtonEnabled: enabled });
+    updateToggleStatus(floatingToggle, floatingToggleStatus, enabled);
+    setStatus(enabled ? '已开启：漂浮翻译按钮' : '已关闭：漂浮翻译按钮', enabled ? 'ok' : '');
+  } catch (error) {
+    e.target.checked = previous;
+    updateToggleStatus(floatingToggle, floatingToggleStatus, previous);
+    setStatus('当前页面无法切换漂浮按钮：' + String(error?.message || error || ''), 'err');
+    console.warn('Failed to toggle floating button:', error);
   }
 });
+
+function bindSelectionDisplayToggle(toggle, status, key, label) {
+  toggle?.addEventListener('change', async (e) => {
+    const enabled = !!e.target.checked;
+    try {
+      await chrome.storage.sync.set({ [key]: enabled });
+      updateToggleStatus(toggle, status, enabled);
+      setStatus(`${enabled ? '已开启' : '已关闭'}：${label}`, enabled ? 'ok' : '');
+    } catch (error) {
+      e.target.checked = !enabled;
+      updateToggleStatus(toggle, status, !enabled);
+      setStatus(`${label}设置失败：${String(error?.message || error || '')}`, 'err');
+    }
+  });
+}
+
+bindSelectionDisplayToggle(selectionBilingualToggle, selectionBilingualToggleStatus, SELECTION_SHOW_BILINGUAL_KEY, '面板显示双语');
+bindSelectionDisplayToggle(selectionSourceToggle, selectionSourceToggleStatus, SELECTION_SHOW_SOURCE_KEY, '显示翻译来源');
 
 // 手动：翻译当前网页
 manualPageBtn?.addEventListener('click', async () => {
@@ -857,67 +1333,15 @@ targetSelect?.addEventListener('change', async () => {
 
 // 反馈按钮：打开GitHub Issues页面
 feedbackBtn?.addEventListener('click', () => {
-  const feedbackUrl = 'https://github.com/AnYi-0/Translator/issues/';
+  const feedbackUrl = 'https://github.com/salimongo/Anwara-Translator/issues';
   chrome.tabs.create({ url: feedbackUrl });
   setStatus('已打开GitHub反馈页面，感谢您的反馈！', 'ok');
 });
 
-// 邮箱反馈按钮：打开邮箱客户端
+// 项目仓库按钮
 emailFeedbackBtn?.addEventListener('click', () => {
-  const email = 'translator2025@163.com';
-  const subject = encodeURIComponent('Translator插件反馈 - ');
-  const body = encodeURIComponent(`您好！
-
-请在下方描述您遇到的问题或建议：
-
-问题描述：
-
-
-重现步骤：
-1. 
-2. 
-3. 
-
-期望结果：
-
-
-实际结果：
-
-
-浏览器信息：
-- Chrome版本：
-- 插件版本：1.4.0
-- 操作系统：
-
-感谢您的反馈！`);
-  
-  const mailtoUrl = `mailto:${email}?subject=${subject}&body=${body}`;
-  
-  // 尝试直接打开邮箱客户端
-  try {
-    chrome.tabs.create({ url: mailtoUrl });
-    setStatus('已打开邮箱客户端，感谢您的反馈！', 'ok');
-  } catch (e) {
-    // 如果直接打开失败，复制邮箱地址到剪贴板
-    navigator.clipboard.writeText('translator2025@163.com').then(() => {
-      setStatus('邮箱地址已复制到剪贴板：translator2025@163.com', 'ok');
-    }).catch(() => {
-      setStatus('请手动发送邮件至：translator2025@163.com', 'warn');
-    });
-  }
-});
-
-// Debug: Double-click feedback button to force show floating button
-feedbackBtn?.addEventListener('dblclick', async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_SHOW_FLOATING_BUTTON' });
-      setStatus('已强制显示漂浮按钮（调试功能）', 'ok');
-    }
-  } catch (e) {
-    setStatus('强制显示失败：' + String(e?.message || e || ''), 'err');
-  }
+  chrome.tabs.create({ url: 'https://github.com/salimongo/Anwara-Translator' });
+  setStatus('已打开 Anwara Translator 项目仓库', 'ok');
 });
 
 // 白名单测试函数（调试用）
@@ -973,12 +1397,6 @@ function testWhitelistMatching() {
   });
 }
 
-// 双击邮箱反馈按钮进行白名单测试
-emailFeedbackBtn?.addEventListener('dblclick', () => {
-  testWhitelistMatching();
-  setStatus('白名单匹配测试完成，请查看控制台', 'ok');
-});
-
 // Optional: update availability hint when selects change
 async function updateHints() {
   const src = sourceSelect.value === "auto" ? "en" : sourceSelect.value; // best-effort for hint
@@ -988,4 +1406,22 @@ async function updateHints() {
 }
 sourceSelect.addEventListener("change", updateHints);
 targetSelect.addEventListener("change", updateHints);
+
+const consoleTabs = Array.from(document.querySelectorAll('.console-tab'));
+function setConsoleTab(tabName) {
+  const activeTab = tabName || 'translation';
+  document.body.dataset.activeTab = activeTab;
+  consoleTabs.forEach((tab) => {
+    const isActive = tab.dataset.tab === activeTab;
+    tab.classList.toggle('is-active', isActive);
+    tab.setAttribute('aria-selected', String(isActive));
+  });
+  if (activeTab === 'archive') {
+    void loadHistoryState();
+  }
+}
+consoleTabs.forEach((tab) => {
+  tab.addEventListener('click', () => setConsoleTab(tab.dataset.tab));
+});
+setConsoleTab('translation');
 

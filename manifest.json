@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Translator快速翻译",
-  "version": "1.5.0",
-  "description": "使用浏览器内置的 Translator 与 Language Detector API 进行本地离线翻译，准确度高，响应速度快，支持自动检测与快速翻译。新增：选中文本自动翻译、网页漂浮翻译按钮。",
+  "name": "Anwara Translator",
+  "version": "1.6.0",
+  "description": "Anwara Translator 是一个基于浏览器内置 Translator 与 Language Detector API 的本地翻译扩展，支持文本、网页与选句翻译、双语面板、历史记录和阅读区，兼容 Chrome 与 Edge。",
   "action": {
-    "default_title": "Translator",
+    "default_title": "Anwara Translator",
     "default_popup": "popup.html"
   },
   "background": {
@@ -18,7 +18,7 @@
       "run_at": "document_end"
     }
   ],
-  "permissions": ["scripting", "activeTab", "tabs", "storage"],
+  "permissions": ["scripting", "activeTab", "tabs", "storage", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "icons": {
     "16": "icon.png",

@@ -6,6 +6,29 @@ const KEY = {
   whitelist: 'whitelistPatterns',
 };
 
+const CONTEXT_MENU_ID = 'translator-translate-page';
+
+function createContextMenus() {
+  chrome.contextMenus.removeAll(() => {
+    if (chrome.runtime.lastError) {
+      console.warn('Failed to clear translator context menus:', chrome.runtime.lastError.message);
+    }
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_ID,
+      title: '翻译当前网页',
+      contexts: ['page']
+    });
+  });
+}
+
+async function ensureContentScript(tabId) {
+  try {
+    const status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+    if (status?.ok) return;
+  } catch {}
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+}
+
 // 检查URL是否在白名单中
 function isUrlInWhitelist(url, patterns) {
   if (!patterns || patterns.length === 0) return false;
@@ -52,6 +75,7 @@ function isUrlInWhitelist(url, patterns) {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
+  createContextMenus();
   const s = await chrome.storage.sync.get([KEY.auto, KEY.target, KEY.whitelist]);
   if (typeof s[KEY.auto] === 'undefined') {
     await chrome.storage.sync.set({ [KEY.auto]: false });
@@ -61,6 +85,29 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   if (typeof s[KEY.whitelist] === 'undefined') {
     await chrome.storage.sync.set({ [KEY.whitelist]: [] });
+  }
+});
+
+chrome.runtime.onStartup.addListener(createContextMenus);
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== CONTEXT_MENU_ID || !tab?.id) return;
+  const url = tab.url || '';
+  if (!/^https?:|^file:|^chrome-extension:/.test(url)) return;
+
+  try {
+    const settings = await chrome.storage.sync.get([KEY.target]);
+    const targetLang = settings[KEY.target] || 'zh-Hans';
+    await ensureContentScript(tab.id);
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'START_PAGE_TRANSLATION',
+      targetLang
+    });
+    if (!response?.ok) {
+      console.warn('Context-menu page translation was not accepted:', response?.error || 'unknown error');
+    }
+  } catch (e) {
+    console.warn('Context-menu page translation failed:', e);
   }
 });
 

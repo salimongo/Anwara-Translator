@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Translator快速翻译</title>
+    <title>Anwara Translator</title>
     <style>
       :root {
         --bg: #f6f8fb;
@@ -257,11 +257,273 @@
       @keyframes spin {
         to { transform: rotate(360deg); }
       }
+      /* Dark tabbed console redesign */
+      :root {
+        --bg: #161616;
+        --card-bg: #181818;
+        --surface: #202020;
+        --surface-strong: #252525;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --border: #3f3f46;
+        --primary: #a9d9ff;
+        --primary-strong: #78bdf1;
+        --ring: rgba(120,189,241,0.24);
+      }
+      html, body { width: 480px; min-width: 480px; max-width: 480px; }
+      html {
+        overflow-y: scroll;
+        scrollbar-gutter: stable;
+        scrollbar-width: thin;
+        scrollbar-color: #596572 #161616;
+      }
+      html::-webkit-scrollbar { width: 12px; }
+      html::-webkit-scrollbar-track { background: #161616; }
+      html::-webkit-scrollbar-thumb { background: #596572; border: 3px solid #161616; border-radius: 999px; }
+      html::-webkit-scrollbar-thumb:hover { background: #7c9bb5; }
+      body {
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow-x: hidden;
+        overflow-y: visible;
+        background: var(--bg) !important;
+        color: var(--text) !important;
+      }
+      .card {
+        width: 100% !important;
+        min-height: 100vh;
+        margin: 0 !important;
+        padding: 20px 30px 28px !important;
+        background: var(--card-bg) !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+      }
+      .console-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .brand-lockup { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+      .brand-title { color: #f8fbff; font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+      .brand-version { color: var(--muted); font-size: 12px; font-weight: 600; }
+      .brand-subtitle { color: #8fceed; font-size: 11px; white-space: nowrap; }
+      .console-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4px;
+        margin: 0 -8px 20px;
+        padding: 4px;
+        border: 1px solid #34343a;
+        border-radius: 8px;
+        background: #1d1d1f;
+      }
+      .console-tab {
+        width: 100%;
+        min-height: 32px;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent !important;
+        color: #a6a6ad !important;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background .15s ease, color .15s ease;
+      }
+      .console-tab:hover { color: #f4f4f5 !important; background: #28282b !important; }
+      .console-tab.is-active {
+        color: #101820 !important;
+        background: var(--primary) !important;
+        box-shadow: 0 0 12px rgba(120,189,241,.22);
+        font-weight: 700;
+      }
+      .console-tab:focus-visible { outline: 2px solid var(--primary-strong); outline-offset: 2px; }
+      body[data-active-tab="translation"] #historySection,
+      body[data-active-tab="translation"] [data-console-section="settings"],
+      body[data-active-tab="archive"] > .card > #pageActions,
+      body[data-active-tab="archive"] > .card > .row,
+      body[data-active-tab="archive"] > .card > .translation-input-section,
+      body[data-active-tab="archive"] > .card > #translateBtn,
+      body[data-active-tab="archive"] > .card > #status,
+      body[data-active-tab="archive"] > .card > #downloadSection,
+      body[data-active-tab="archive"] > .card > .translation-output-section,
+      body[data-active-tab="archive"] [data-console-section="settings"],
+      body[data-active-tab="settings"] > .card > #pageActions,
+      body[data-active-tab="settings"] > .card > .row,
+      body[data-active-tab="settings"] > .card > .translation-input-section,
+      body[data-active-tab="settings"] > .card > #translateBtn,
+      body[data-active-tab="settings"] > .card > #status,
+      body[data-active-tab="settings"] > .card > #downloadSection,
+      body[data-active-tab="settings"] > .card > .translation-output-section,
+      body[data-active-tab="settings"] > .card > #historySection { display: none !important; }
+      body[data-active-tab="translation"] > .card > #pageActions,
+      body[data-active-tab="translation"] > .card > .row,
+      body[data-active-tab="translation"] > .card > .translation-input-section,
+      body[data-active-tab="translation"] > .card > #translateBtn,
+      body[data-active-tab="translation"] > .card > #status,
+      body[data-active-tab="translation"] > .card > #downloadSection,
+      body[data-active-tab="translation"] > .card > .translation-output-section,
+      body[data-active-tab="archive"] > .card > #historySection,
+      body[data-active-tab="settings"] [data-console-section="settings"] { display: block; }
+      label, .small, .hint { color: var(--muted) !important; }
+      .row { grid-template-columns: 1fr 36px 1fr !important; gap: 10px !important; margin: 12px 0 !important; }
+      select, textarea, input[type="text"], input[type="date"] {
+        border: 1px solid #4a4a50 !important;
+        border-radius: 6px !important;
+        background: var(--surface) !important;
+        color: var(--text) !important;
+        box-shadow: none !important;
+      }
+      select { min-height: 38px; padding: 8px 10px !important; }
+      textarea { min-height: 132px !important; margin: 8px 0 10px !important; padding: 12px !important; resize: vertical; line-height: 1.5; }
+      select:focus, textarea:focus, input[type="text"]:focus, input[type="date"]:focus { outline: none; border-color: var(--primary-strong) !important; box-shadow: 0 0 0 3px var(--ring) !important; }
+      .swap-cell {
+        align-items: flex-end !important;
+        align-self: end !important;
+        justify-content: center !important;
+        padding-bottom: 3px !important;
+      }
+      .swap-btn { width: 32px !important; height: 32px !important; border-radius: 6px !important; border: 1px solid #4a4a50 !important; background: var(--surface-strong) !important; color: var(--primary) !important; transform: translateY(8px); }
+      .swap-btn:hover { background: #303038 !important; border-color: var(--primary-strong) !important; }
+      .btn { min-height: 34px; border-radius: 6px !important; border: 1px solid #4a4a50 !important; background: var(--surface-strong) !important; color: #ececf0 !important; box-shadow: none !important; }
+      .btn:not(.primary):hover { background: #303038 !important; border-color: #6b6b75 !important; color: #fff !important; }
+      .btn.primary { background: var(--primary) !important; color: #12202a !important; border-color: var(--primary) !important; box-shadow: 0 0 16px rgba(120,189,241,.18) !important; }
+      .btn.primary:hover { background: #c2e7ff !important; box-shadow: 0 0 20px rgba(120,189,241,.28) !important; }
+      .translation-input-section > div:first-child label,
+      .translation-output-section > div:first-child label { color: #f4f4f5 !important; }
+      .char-count { background: #29292d !important; border-color: #48484f !important; color: #a9d9ff !important; }
+      .char-count.warning { background: #3a2d16 !important; border-color: #a66a19 !important; color: #f5c66d !important; }
+      .char-count.danger { background: #3a1f22 !important; border-color: #a64650 !important; color: #ff9da5 !important; }
+      .out { min-height: 120px !important; padding: 14px !important; border: 1px solid #4a4a50 !important; border-radius: 6px !important; background: #1e1e20 !important; color: #f4f4f5 !important; box-shadow: none !important; }
+      .out:empty::before { color: #7d7d86; }
+      .out:not(:empty) { border-color: #4c6f86 !important; background: #1e2429 !important; box-shadow: inset 0 0 16px rgba(120,189,241,.05) !important; }
+      .prog { border: 1px solid #44444b !important; border-radius: 6px !important; padding: 10px !important; background: #202024 !important; }
+      progress { background: #34343a !important; }
+      progress::-webkit-progress-bar { background: #34343a; }
+      progress::-webkit-progress-value { background: var(--primary-strong); }
+      #status { min-height: 18px; margin-top: 8px; }
+      #historySection, [data-console-section="settings"] { background: #1d1d1f !important; border: 1px solid #3e3e45 !important; border-radius: 8px !important; box-shadow: none !important; }
+      #historySection .section-title, [data-console-section="settings"] .section-title { color: #f4f4f5 !important; }
+      #historySection select, #historySection input[type="date"], #historySection input[type="checkbox"] { accent-color: var(--primary-strong); }
+      #historyList, #whitelistContainer {
+        background: #18181a !important;
+        border-color: #3e3e45 !important;
+        box-shadow: none !important;
+        scrollbar-width: thin;
+        scrollbar-color: #596572 transparent;
+      }
+      #historyList::-webkit-scrollbar,
+      #whitelistContainer::-webkit-scrollbar,
+      .history-card-source::-webkit-scrollbar,
+      .history-card-translated::-webkit-scrollbar { width: 6px; height: 6px; }
+      #historyList::-webkit-scrollbar-track,
+      #whitelistContainer::-webkit-scrollbar-track,
+      .history-card-source::-webkit-scrollbar-track,
+      .history-card-translated::-webkit-scrollbar-track { background: transparent; }
+      #historyList::-webkit-scrollbar-thumb,
+      #whitelistContainer::-webkit-scrollbar-thumb,
+      .history-card-source::-webkit-scrollbar-thumb,
+      .history-card-translated::-webkit-scrollbar-thumb {
+        background: #596572;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background-clip: padding-box;
+      }
+      #historyList::-webkit-scrollbar-thumb:hover,
+      #whitelistContainer::-webkit-scrollbar-thumb:hover,
+      .history-card-source::-webkit-scrollbar-thumb:hover,
+      .history-card-translated::-webkit-scrollbar-thumb:hover { background: #7c9bb5; }
+      .history-card { background: #232326 !important; border-color: #414149 !important; }
+      .history-card-source { color: #e4e4e7 !important; }
+      .history-card-translated { color: #a9d9ff !important; }
+      .history-card-meta { color: #8b8b95 !important; }
+      .history-card button { min-height: 28px !important; }
+      .switches-section { padding: 14px !important; }
+      .switch-item { border-bottom-color: #38383e !important; }
+      .switch-item label { color: #e4e4e7 !important; }
+      .toggle-switch { width: 44px !important; height: 24px !important; }
+      .toggle-slider { background: #45454d !important; }
+      .toggle-switch input:checked + .toggle-slider { background: #76bde9 !important; box-shadow: 0 0 10px rgba(118,189,233,.25) !important; }
+      .toggle-slider:before { background: #f6f6f7 !important; }
+      [data-console-section="settings"] input[type="text"] { min-height: 34px; }
+      [data-console-section="settings"] a { color: #a9d9ff !important; background: #25252a !important; border-color: #4a4a50 !important; }
+      [data-console-section="settings"] a:hover { background: #303038 !important; border-color: var(--primary-strong) !important; }
+      .hidden { display: none !important; }
+      .archive-viewbar { display:flex; align-items:center; gap:8px; margin:4px 0 8px; }
+      .archive-tabs { display:grid; grid-template-columns:1fr 1fr; gap:3px; flex:1; padding:3px; border:1px solid #3f3f46; border-radius:7px; background:#18181a; }
+      .archive-tab, .reader-mode-tab { width:100%; min-height:30px; padding:5px 8px; border:0; border-radius:5px; background:transparent !important; color:#a1a1aa !important; font-size:11px; cursor:pointer; }
+      .archive-tab:hover, .reader-mode-tab:hover { background:#2a2a2e !important; color:#f4f4f5 !important; }
+      .archive-tab.is-active, .reader-mode-tab.is-active { background:#a9d9ff !important; color:#11202a !important; font-weight:700; box-shadow:0 0 10px rgba(120,189,241,.16); }
+      .history-view-select { display:none !important; }
+      .reader-section { margin-top:10px; padding:10px; border:1px solid #46505a; border-radius:8px; background:#1a1c1e; }
+      .reader-toolbar { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; margin-bottom:9px; }
+      .reader-back-btn { width:auto !important; min-height:29px !important; padding:5px 8px !important; font-size:10px !important; }
+      .reader-heading { min-width:0; display:flex; flex-direction:column; gap:2px; }
+      .reader-heading strong { color:#f4f4f5; font-size:12px; }
+      .reader-title { color:#8fceed; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .reader-font-controls { display:flex; align-items:center; gap:4px; }
+      .reader-font-btn { width:29px !important; min-height:29px !important; padding:0 !important; font-size:11px !important; }
+      .reader-font-size { min-width:22px; text-align:center; color:#d4d4d8; font-size:10px; }
+      .reader-mode-tabs { display:grid; grid-template-columns:repeat(3, 1fr); gap:3px; margin-bottom:8px; padding:3px; border:1px solid #38383f; border-radius:7px; background:#18181a; }
+      .reader-note { min-height:16px; margin-bottom:6px; color:#8b9aa6; font-size:10px; line-height:1.4; }
+      .reader-content { max-height:54vh; overflow:auto; padding:2px 4px 4px; color:#f4f4f5; font-size:17px; line-height:1.72; scrollbar-width:thin; scrollbar-color:#596572 transparent; }
+      .reader-content::-webkit-scrollbar { width:6px; height:6px; }
+      .reader-content::-webkit-scrollbar-track { background:transparent; }
+      .reader-content::-webkit-scrollbar-thumb { background:#596572; border:1px solid transparent; border-radius:999px; background-clip:padding-box; }
+      .reader-content::-webkit-scrollbar-thumb:hover { background:#7c9bb5; }
+      .reader-pair { padding:9px 8px 10px; border-bottom:1px solid #343940; }
+      .reader-pair:last-child { border-bottom:0; }
+      .reader-source, .reader-translated { white-space:pre-wrap; overflow-wrap:anywhere; }
+      .reader-source { color:#f4f4f5; }
+      .reader-translated { margin-top:5px; color:#a9d9ff; font-size:.82em; line-height:1.6; }
+      .reader-single { padding:9px 8px 10px; white-space:pre-wrap; overflow-wrap:anywhere; border-bottom:1px solid #343940; }
+      .reader-single:last-child { border-bottom:0; }
+      #historySection.reader-open #historyList { display:none !important; }
+      #historySection.reader-open .history-view-select { display:none !important; }
+      .history-action { min-height:28px !important; padding:4px 7px !important; font-size:10px !important; }
+      .archive-viewbar { margin-bottom:10px; }
+      .archive-header-actions { display:flex; gap:5px; flex:0 0 auto; }
+      .archive-header-btn { width:auto !important; min-height:30px !important; padding:5px 8px !important; font-size:10px !important; }
+      .history-tools { margin:0 0 10px; padding:9px; border:1px solid #3b4148; border-radius:7px; background:#191b1d; }
+      .history-tools.hidden { display:none !important; }
+      .history-tool-options { display:grid; grid-template-columns:1fr 1fr; gap:7px; padding-bottom:8px; border-bottom:1px solid #343940; }
+      .history-tool-options label { display:flex; align-items:center; gap:6px; color:#d4d4d8 !important; font-size:10px; line-height:1.35; }
+      .history-tool-options input, .history-tool-row input { accent-color:#78bdf1; }
+      .history-tool-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; }
+      .history-tool-label { color:#8f98a1; font-size:10px; }
+      .history-tool-btn { width:auto !important; min-height:28px !important; padding:4px 8px !important; font-size:10px !important; }
+      .history-date-row, .history-bulk-row { display:flex; gap:6px; margin-bottom:7px; }
+      .history-date-row input { min-width:0; flex:1; min-height:30px; padding:5px 7px !important; font-size:10px !important; }
+      .history-bulk-row { margin-bottom:0; }
+      .history-bulk-row .btn { min-height:29px !important; padding:4px 6px !important; font-size:10px !important; }
+      #historyList { max-height:330px !important; padding:5px !important; }
+      .history-card { padding:9px !important; margin-bottom:7px !important; }
+      .history-card-source { max-height:44px !important; }
+      .history-card-translated { max-height:52px !important; }
+      .history-card-actions { margin-top:7px !important; }
+      #historySection.reader-open .archive-viewbar,
+      #historySection.reader-open .history-tools,
+      #historySection.reader-open #historyStatus { display:none !important; }
+      #historySection.reader-open { padding-top:12px !important; }
     </style>
   </head>
   <body>
     <div class="card">
-      <h1>Translator快速翻译</h1>
+      <header class="console-header">
+        <div class="brand-lockup">
+          <span class="brand-title">Anwara Translator</span>
+          <span class="brand-version">v1.6.0</span>
+        </div>
+        <span class="brand-subtitle">本地浏览器翻译</span>
+      </header>
+
+      <nav class="console-tabs" role="tablist" aria-label="主控制台页面">
+        <button class="console-tab is-active" type="button" role="tab" aria-selected="true" data-tab="translation">翻译</button>
+        <button class="console-tab" type="button" role="tab" aria-selected="false" data-tab="archive">历史 / 阅读区</button>
+        <button class="console-tab" type="button" role="tab" aria-selected="false" data-tab="settings">设置</button>
+      </nav>
 
       <!-- 页面翻译按钮 -->
       <div id="pageActions" style="display:flex;gap:8px;margin-bottom:14px;">
@@ -291,7 +553,7 @@
       </div>
 
       <!-- 输入区域 -->
-      <div style="margin-top:16px;">
+      <div class="translation-input-section" style="margin-top:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <label for="inputText" style="display:flex;align-items:center;gap:6px;font-weight:500;color:var(--text);">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--primary);">
@@ -339,7 +601,7 @@
       </div>
 
       <!-- 输出区域 -->
-      <div style="margin-top:20px;">
+      <div class="translation-output-section" style="margin-top:20px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <label style="display:flex;align-items:center;gap:6px;font-weight:500;color:var(--text);">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#10b981;">
@@ -367,8 +629,77 @@
         <div id="output" class="out"></div>
       </div>
 
+      <!-- 历史翻译与阅读区 -->
+      <div id="historySection" style="margin-top:16px;padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div>
+            <div class="small section-title" style="font-weight:600;">历史翻译与阅读区</div>
+            <div class="small" style="color:var(--muted);font-size:10px;margin-top:2px;">历史记录与阅读区分开管理</div>
+          </div>
+        </div>
+        <div class="archive-viewbar">
+          <div class="archive-tabs" role="tablist" aria-label="历史与阅读区">
+            <button class="archive-tab is-active" type="button" role="tab" aria-selected="true" data-history-view="all">历史翻译</button>
+            <button class="archive-tab" type="button" role="tab" aria-selected="false" data-history-view="reading">阅读区</button>
+          </div>
+          <div class="archive-header-actions">
+            <button id="refreshHistoryBtn" class="btn archive-header-btn" type="button" title="刷新历史记录">刷新</button>
+            <button id="historyManageBtn" class="btn archive-header-btn" type="button" aria-expanded="false">管理</button>
+          </div>
+        </div>
+        <select id="historyViewSelect" class="history-view-select" aria-hidden="true" tabindex="-1">
+          <option value="all">全部历史</option>
+          <option value="reading">阅读区</option>
+        </select>
+        <div id="historyTools" class="history-tools hidden">
+          <div class="history-tool-options">
+            <label><input id="historyEnabledToggle" type="checkbox" checked>记录历史翻译</label>
+            <label><input id="autoReadingToggle" type="checkbox">新翻译自动加入阅读区</label>
+          </div>
+          <div class="history-tool-row">
+            <span class="history-tool-label">批量操作</span>
+            <button id="historySelectAllBtn" class="btn history-tool-btn" type="button">全选</button>
+          </div>
+          <div class="history-date-row">
+            <input id="historyFromDate" type="date" aria-label="开始日期">
+            <input id="historyToDate" type="date" aria-label="结束日期">
+          </div>
+          <div class="history-bulk-row">
+            <button id="deleteSelectedHistoryBtn" class="btn" type="button">删除选中</button>
+            <button id="deleteDateHistoryBtn" class="btn" type="button">删日期范围</button>
+            <button id="clearHistoryBtn" class="btn" type="button">清空全部</button>
+          </div>
+        </div>
+        <div id="historyStatus" class="small" style="color:var(--muted);margin-bottom:6px;" aria-live="polite"></div>
+        <div id="historyList" style="max-height:260px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;padding:6px;">
+          <div class="small" style="padding:14px;text-align:center;color:var(--muted);">暂无历史翻译</div>
+        </div>
+
+        <section id="readerSection" class="reader-section hidden" aria-live="polite">
+          <div class="reader-toolbar">
+            <button id="readerBackBtn" class="btn reader-back-btn" type="button">返回列表</button>
+            <div class="reader-heading">
+              <strong>轻量阅读</strong>
+              <span id="readerTitle" class="reader-title"></span>
+            </div>
+            <div class="reader-font-controls" aria-label="字号调整">
+              <button id="readerFontDecreaseBtn" class="btn reader-font-btn" type="button" title="减小字号" aria-label="减小字号">A−</button>
+              <span id="readerFontSizeLabel" class="reader-font-size">17</span>
+              <button id="readerFontIncreaseBtn" class="btn reader-font-btn" type="button" title="增大字号" aria-label="增大字号">A+</button>
+            </div>
+          </div>
+          <div class="reader-mode-tabs" role="tablist" aria-label="阅读显示模式">
+            <button class="reader-mode-tab is-active" type="button" role="tab" aria-selected="true" data-reader-mode="dual">双语</button>
+            <button class="reader-mode-tab" type="button" role="tab" aria-selected="false" data-reader-mode="source">原文</button>
+            <button class="reader-mode-tab" type="button" role="tab" aria-selected="false" data-reader-mode="translated">译文</button>
+          </div>
+          <div id="readerAlignmentStatus" class="reader-note"></div>
+          <article id="readerContent" class="reader-content"></article>
+        </section>
+      </div>
+
       <!-- 功能开关区域 -->
-      <div class="switches-section" style="margin-top:16px;padding:14px;border:1px solid var(--border);border-radius:10px;">
+      <div class="switches-section" data-console-section="settings" style="margin-top:16px;padding:14px;border:1px solid var(--border);border-radius:10px;">
         <div class="small section-title" style="margin-bottom:12px;">功能设置</div>
 
         <div style="display:flex;flex-direction:column;gap:8px;">
@@ -413,13 +744,40 @@
               <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;border-radius:24px;transition:0.3s;"></span>
             </label>
           </div>
+
+          <!-- 选句面板显示偏好 -->
+          <div class="switch-item" style="display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;flex-direction:column;">
+              <label class="small" style="color:var(--text);cursor:pointer;font-weight:500;" for="selectionBilingualToggle">
+                面板显示双语
+              </label>
+              <span id="selectionBilingualToggleStatus" class="small" style="color:var(--muted);font-size:10px;margin-top:2px;">已开启</span>
+            </div>
+            <label class="toggle-switch" style="position:relative;display:inline-block;width:44px;height:24px;">
+              <input id="selectionBilingualToggle" type="checkbox" style="opacity:0;width:0;height:0;">
+              <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;border-radius:24px;transition:0.3s;"></span>
+            </label>
+          </div>
+
+          <div class="switch-item" style="display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;flex-direction:column;">
+              <label class="small" style="color:var(--text);cursor:pointer;font-weight:500;" for="selectionSourceToggle">
+                显示翻译来源
+              </label>
+              <span id="selectionSourceToggleStatus" class="small" style="color:var(--muted);font-size:10px;margin-top:2px;">已开启</span>
+            </div>
+            <label class="toggle-switch" style="position:relative;display:inline-block;width:44px;height:24px;">
+              <input id="selectionSourceToggle" type="checkbox" style="opacity:0;width:0;height:0;">
+              <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;border-radius:24px;transition:0.3s;"></span>
+            </label>
+          </div>
         </div>
 
 
       </div>
 
       <!-- 白名单管理区域 -->
-      <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%);">
+      <div data-console-section="settings" style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%);">
         <div style="display:flex;align-items:center;margin-bottom:10px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#007aff;margin-right:6px;">
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
@@ -457,7 +815,7 @@
       </div>
 
       <!-- 反馈区域 -->
-      <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg, #fefefe 0%, #f8fafc 100%);">
+      <div data-console-section="settings" style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg, #fefefe 0%, #f8fafc 100%);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <div style="display:flex;flex-direction:column;">
             <span class="small" style="color:var(--text);font-weight:500;">遇到问题？</span>
@@ -465,48 +823,41 @@
           </div>
         </div>
         <div style="display:flex;gap:6px;">
-          <button id="feedbackBtn" class="btn" style="flex:1;padding:6px 10px;font-size:11px;background:linear-gradient(135deg, #4a90e2, #346fc7);color:#fff;border:none;display:flex;align-items:center;justify-content:center;gap:4px;" title="GitHub Issues反馈">
+          <button id="feedbackBtn" class="btn" style="flex:1;padding:6px 10px;font-size:11px;background:linear-gradient(135deg, #4a90e2, #346fc7);color:#fff;border:none;display:flex;align-items:center;justify-content:center;gap:4px;" title="项目 Issues 反馈">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
             </svg>
-            GitHub
+            Issues
           </button>
-          <button id="emailFeedbackBtn" class="btn" style="flex:1;padding:6px 10px;font-size:11px;background:linear-gradient(135deg, #10b981, #059669);color:#fff;border:none;display:flex;align-items:center;justify-content:center;gap:4px;" title="邮箱反馈">
+          <button id="emailFeedbackBtn" class="btn" style="flex:1;padding:6px 10px;font-size:11px;background:linear-gradient(135deg, #10b981, #059669);color:#fff;border:none;display:flex;align-items:center;justify-content:center;gap:4px;" title="打开项目仓库">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
               <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
-            邮箱
+            仓库
           </button>
         </div>
       </div>
 
-      <!-- 官网链接区域 -->
-      <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%);">
+      <!-- 项目仓库区域 -->
+      <div data-console-section="settings" style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%);">
         <div style="display:flex;align-items:center;margin-bottom:8px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#007aff;margin-right:6px;">
             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.53 1.53"></path>
             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.53-1.53"></path>
           </svg>
-          <span class="small" style="color:#1d1d1f;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;">官方网站</span>
+          <span class="small" style="color:#1d1d1f;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;">项目仓库</span>
         </div>
         <div style="display:flex;gap:8px;">
-          <a href="https://translation.run/" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1;padding:8px 12px;font-size:12px;background:#ffffff;border:1px solid #d1d1d6;color:#007aff;text-decoration:none;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:4px;transition:all 0.2s ease;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;font-weight:500;" onmouseover="this.style.background='#f5f5f7';this.style.borderColor='#007aff';" onmouseout="this.style.background='#ffffff';this.style.borderColor='#d1d1d6';">
+          <a href="https://github.com/salimongo/Anwara-Translator" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1;padding:8px 12px;font-size:12px;background:#ffffff;border:1px solid #d1d1d6;color:#007aff;text-decoration:none;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:4px;transition:all 0.2s ease;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;font-weight:500;" onmouseover="this.style.background='#f5f5f7';this.style.borderColor='#007aff';" onmouseout="this.style.background='#ffffff';this.style.borderColor='#d1d1d6';">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="2" y1="12" x2="22" y2="12"></line>
               <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
             </svg>
-            Translation.run
+            Anwara-Translator
           </a>
-          <a href="https://mytranslator.run/" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1;padding:8px 12px;font-size:12px;background:#ffffff;border:1px solid #d1d1d6;color:#007aff;text-decoration:none;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:4px;transition:all 0.2s ease;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;font-weight:500;" onmouseover="this.style.background='#f5f5f7';this.style.borderColor='#007aff';" onmouseout="this.style.background='#ffffff';this.style.borderColor='#d1d1d6';">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
-            MyTranslator.run
-          </a>
+
         </div>
       </div>
       <script src="popup.js" type="module"></script>
