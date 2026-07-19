@@ -668,15 +668,16 @@ clearHistoryBtn?.addEventListener('click', async () => {
   if (!window.confirm(`确定清空全部 ${currentItems.length} 条${getActiveArchiveLabel()}记录吗？`)) return;
 
   const previousItems = [...currentItems];
-  if (view === 'reading') readingItems = [];
-  else historyItems = [];
-  closeReader();
-  setHistoryToolsOpen(false);
   try {
-    if (view === 'reading') await saveReadingItems();
-    else await saveHistoryItems();
-    await chrome.storage.local.set({ [CONSOLE_TAB_KEY]: 'translation' });
+    const clearPatch = view === 'reading'
+      ? { [READING_KEY]: [], [CONSOLE_TAB_KEY]: 'translation' }
+      : { [HISTORY_KEY]: [], [CONSOLE_TAB_KEY]: 'translation' };
+    await chrome.storage.local.set(clearPatch);
+    if (view === 'reading') readingItems = [];
+    else historyItems = [];
     setConsoleTab('translation', false);
+    closeReader();
+    setHistoryToolsOpen(false);
     renderHistoryList();
     setHistoryStatus(`${getActiveArchiveLabel()}已清空`, 'ok');
   } catch (error) {
