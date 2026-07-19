@@ -2186,7 +2186,18 @@ consoleTabs.forEach((tab) => {
 void (async () => {
   try {
     const result = await chrome.storage.local.get([CONSOLE_TAB_KEY]);
-    setConsoleTab(result[CONSOLE_TAB_KEY] || 'translation', false);
+    const requestedTab = ['translation', 'settings', 'archive'].includes(result[CONSOLE_TAB_KEY])
+      ? result[CONSOLE_TAB_KEY]
+      : 'translation';
+    if (requestedTab !== 'archive') {
+      setConsoleTab(requestedTab, false);
+      return;
+    }
+
+    // Keep the popup usable while an empty or damaged archive is being recovered.
+    setConsoleTab('translation', false);
+    await loadHistoryState();
+    if (historyItems.length || readingItems.length) setConsoleTab('archive', false);
   } catch {
     setConsoleTab('translation', false);
   }
