@@ -658,6 +658,8 @@ clearHistoryBtn?.addEventListener('click', async () => {
   const view = getActiveArchiveView();
   const currentItems = getActiveArchiveItems();
   if (!currentItems.length) {
+    await chrome.storage.local.set({ [CONSOLE_TAB_KEY]: 'translation' }).catch(() => {});
+    setConsoleTab('translation', false);
     closeReader();
     setHistoryToolsOpen(false);
     renderHistoryList();
@@ -665,7 +667,7 @@ clearHistoryBtn?.addEventListener('click', async () => {
   }
   if (!window.confirm(`确定清空全部 ${currentItems.length} 条${getActiveArchiveLabel()}记录吗？`)) return;
 
-  const previousItems = currentItems;
+  const previousItems = [...currentItems];
   if (view === 'reading') readingItems = [];
   else historyItems = [];
   closeReader();
@@ -673,7 +675,8 @@ clearHistoryBtn?.addEventListener('click', async () => {
   try {
     if (view === 'reading') await saveReadingItems();
     else await saveHistoryItems();
-    await pruneTranslationVariants();
+    await chrome.storage.local.set({ [CONSOLE_TAB_KEY]: 'translation' });
+    setConsoleTab('translation', false);
     renderHistoryList();
     setHistoryStatus(`${getActiveArchiveLabel()}已清空`, 'ok');
   } catch (error) {
@@ -2161,7 +2164,9 @@ targetSelect.addEventListener("change", updateHints);
 const CONSOLE_TAB_KEY = 'translatorConsoleTab';
 const consoleTabs = Array.from(document.querySelectorAll('.console-tab'));
 function setConsoleTab(tabName, persist = true) {
-  const activeTab = tabName || 'translation';
+  const activeTab = ['translation', 'settings', 'archive'].includes(tabName)
+    ? tabName
+    : 'translation';
   document.body.dataset.activeTab = activeTab;
   consoleTabs.forEach((tab) => {
     const isActive = tab.dataset.tab === activeTab;
