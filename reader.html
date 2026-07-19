@@ -1,0 +1,102 @@
+﻿<!doctype html>
+<html lang="zh-CN" data-anwara-extension-page="true">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anwara Translator · 阅读</title>
+  <link rel="stylesheet" href="reader.css">
+</head>
+<body>
+  <main class="reader-shell">
+    <header class="reader-topbar">
+      <div class="reader-brand">
+        <span class="reader-mark" aria-hidden="true">A</span>
+        <div>
+          <strong>Anwara Translator</strong>
+          <span>双语阅读</span>
+        </div>
+      </div>
+      <div class="reader-actions">
+        <button id="readerBackBtn" class="icon-btn" type="button" title="返回跳转前位置" aria-label="返回跳转前位置" hidden>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+        </button>
+        <button id="tocToggleBtn" class="icon-btn" type="button" title="打开目录" aria-label="打开目录" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M5 6h14M5 12h14M5 18h14"/>
+          </svg>
+        </button>
+        <button id="copyTranslatedBtn" class="icon-text-btn" type="button" title="复制译文">复制译文</button>
+        <button id="closeReaderBtn" class="icon-btn" type="button" title="关闭阅读页" aria-label="关闭阅读页">×</button>
+      </div>
+    </header>
+
+    <div id="tocBackdrop" class="toc-backdrop" hidden></div>
+    <aside id="tocPanel" class="toc-panel" hidden aria-hidden="true">
+      <div class="toc-panel-header">
+        <strong>目录</strong>
+        <button id="tocCloseBtn" class="icon-btn" type="button" title="关闭目录" aria-label="关闭目录">×</button>
+      </div>
+      <nav id="tocList" class="toc-list" aria-label="文章目录"></nav>
+    </aside>
+
+    <section class="reader-paper" aria-labelledby="readerTitle">
+      <div class="article-heading">
+        <div class="article-kicker">TRANSLATION NOTE</div>
+        <h1 id="readerTitle">正在读取历史记录</h1>
+        <a id="sourceLink" class="source-link" target="_blank" rel="noreferrer noopener"></a>
+        <div class="article-meta-row">
+          <div id="readerMeta" class="article-meta"></div>
+          <div class="reader-translation-tools">
+            <button id="retranslateBtn" class="reader-retranslate-link" type="button" title="重新翻译" aria-label="重新翻译" aria-expanded="false" aria-haspopup="true">重新翻译</button>
+            <div id="retranslateMenu" class="reader-engine-menu" hidden role="menu" aria-label="选择重新翻译方式">
+              <div class="reader-engine-menu-title">从原文重新生成</div>
+              <button class="reader-engine-option" type="button" role="menuitem" data-engine="local">本地翻译</button>
+              <button class="reader-engine-option" type="button" role="menuitem" data-engine="online">在线翻译</button>
+              <button class="reader-engine-option" type="button" role="menuitem" data-engine="llm">大模型翻译</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reader-toolbar">
+        <div class="mode-tabs" role="tablist" aria-label="阅读模式">
+          <button class="mode-tab is-active" type="button" role="tab" aria-selected="true" data-mode="dual">双语</button>
+          <button class="mode-tab" type="button" role="tab" aria-selected="false" data-mode="source">原文</button>
+          <button class="mode-tab" type="button" role="tab" aria-selected="false" data-mode="translated">译文</button>
+        </div>
+        <div class="reader-display-controls">
+          <div class="theme-picker" role="group" aria-label="阅读主题">
+            <button class="theme-swatch is-active" type="button" data-theme="paper" title="纸张" aria-label="纸张主题"><span aria-hidden="true"></span></button>
+            <button class="theme-swatch" type="button" data-theme="snow" title="雪白" aria-label="雪白主题"><span aria-hidden="true"></span></button>
+            <button class="theme-swatch" type="button" data-theme="sepia" title="暖棕" aria-label="暖棕主题"><span aria-hidden="true"></span></button>
+            <button class="theme-swatch" type="button" data-theme="graphite" title="石墨" aria-label="石墨主题"><span aria-hidden="true"></span></button>
+            <button class="theme-swatch" type="button" data-theme="midnight" title="午夜" aria-label="午夜主题"><span aria-hidden="true"></span></button>
+            <button class="theme-swatch" type="button" data-theme="forest" title="森林" aria-label="森林主题"><span aria-hidden="true"></span></button>
+          </div>
+          <label class="font-picker" title="阅读字体">
+            <span class="sr-only">阅读字体</span>
+            <select id="fontFamilySelect" aria-label="阅读字体">
+              <option value="serif">衬线</option>
+              <option value="sans">黑体</option>
+              <option value="kai">楷体</option>
+              <option value="system">系统</option>
+            </select>
+          </label>
+          <div class="reader-font-controls" aria-label="字号调整">
+            <button id="fontDecreaseBtn" class="icon-btn" type="button" title="减小字号" aria-label="减小字号">A-</button>
+            <span id="fontSizeLabel" aria-live="polite">18</span>
+            <button id="fontIncreaseBtn" class="icon-btn" type="button" title="增大字号" aria-label="增大字号">A+</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="readerStatus" class="reader-status" role="status" aria-live="polite"></div>
+      <article id="readerContent" class="reader-content"></article>
+    </section>
+  </main>
+  <script src="i18n.js"></script>
+  <script src="reader.js"></script>
+</body>
+</html>

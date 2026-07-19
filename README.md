@@ -10,6 +10,8 @@
   <a href="https://github.com/salimongo/Anwara-Translator/releases">Releases</a>
 </p>
 
+English documentation: [README.en.md](README.en.md)
+
 Anwara Translator 是一个基于浏览器内置 Translator API 与 Language Detector API 的本地翻译扩展，支持文本、网页和选句翻译，并提供双语面板、历史记录与阅读区。翻译在本地完成，首次使用可能需要下载浏览器模型。
 
 ## 下载与安装
@@ -61,6 +63,10 @@ Anwara Translator 是一个基于浏览器内置 Translator API 与 Language Det
 
 ## License
 本项目采用 Apache License 2.0 开源协议。
+
+## 多语言
+
+扩展界面已首批支持中文与英文，并跟随浏览器语言自动选择。其他语言暂未迁移，后续按 [I18N.md](I18N.md) 的边界逐步添加。
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
 

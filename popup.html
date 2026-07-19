@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html data-anwara-extension-page="true">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -117,7 +117,7 @@
         transition: all 0.2s ease;
       }
       .out:empty::before {
-        content: "翻译结果将显示在这里...";
+        content: var(--translation-result-placeholder, "翻译结果将显示在这里...");
         color: var(--muted);
         font-style: italic;
         opacity: 0.7;
@@ -340,6 +340,25 @@
         font-weight: 700;
       }
       .console-tab:focus-visible { outline: 2px solid var(--primary-strong); outline-offset: 2px; }
+      .icon-clear-btn {
+        display: grid;
+        width: 22px;
+        height: 22px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        color: #85858e;
+        background: transparent;
+        cursor: pointer;
+      }
+      .icon-clear-btn:hover:not(:disabled),
+      .icon-clear-btn:focus-visible:not(:disabled) {
+        color: #e9a6ad;
+        background: #302327;
+        outline: none;
+      }
+      .icon-clear-btn:disabled { cursor: default; opacity: .3; }
       body[data-active-tab="translation"] #historySection,
       body[data-active-tab="translation"] [data-console-section="settings"],
       body[data-active-tab="archive"] > .card > #pageActions,
@@ -368,8 +387,15 @@
       body[data-active-tab="archive"] > .card > #historySection,
       body[data-active-tab="settings"] [data-console-section="settings"] { display: block; }
       label, .small, .hint { color: var(--muted) !important; }
-      .row { grid-template-columns: 1fr 36px 1fr !important; gap: 10px !important; margin: 12px 0 !important; }
-      select, textarea, input[type="text"], input[type="date"] {
+      .row {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr) !important;
+        align-items: end !important;
+        gap: 10px !important;
+        margin: 12px 0 !important;
+      }
+      .row > div { min-width: 0; }
+      select, textarea, input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="date"] {
         border: 1px solid #4a4a50 !important;
         border-radius: 6px !important;
         background: var(--surface) !important;
@@ -377,15 +403,16 @@
         box-shadow: none !important;
       }
       select { min-height: 38px; padding: 8px 10px !important; }
-      textarea { min-height: 132px !important; margin: 8px 0 10px !important; padding: 12px !important; resize: vertical; line-height: 1.5; }
-      select:focus, textarea:focus, input[type="text"]:focus, input[type="date"]:focus { outline: none; border-color: var(--primary-strong) !important; box-shadow: 0 0 0 3px var(--ring) !important; }
+      textarea { min-height: 124px !important; margin: 8px 0 8px !important; padding: 12px !important; resize: vertical; line-height: 1.5; }
+      select:focus, textarea:focus, input[type="text"]:focus, input[type="url"]:focus, input[type="password"]:focus, input[type="number"]:focus, input[type="date"]:focus { outline: none; border-color: var(--primary-strong) !important; box-shadow: 0 0 0 3px var(--ring) !important; }
       .swap-cell {
+        display: flex !important;
         align-items: flex-end !important;
         align-self: end !important;
         justify-content: center !important;
-        padding-bottom: 3px !important;
+        padding-bottom: 0 !important;
       }
-      .swap-btn { width: 32px !important; height: 32px !important; border-radius: 6px !important; border: 1px solid #4a4a50 !important; background: var(--surface-strong) !important; color: var(--primary) !important; transform: translateY(8px); }
+      .swap-btn { width: 32px !important; height: 32px !important; border-radius: 6px !important; border: 1px solid #4a4a50 !important; background: var(--surface-strong) !important; color: var(--primary) !important; transform: none !important; }
       .swap-btn:hover { background: #303038 !important; border-color: var(--primary-strong) !important; }
       .btn { min-height: 34px; border-radius: 6px !important; border: 1px solid #4a4a50 !important; background: var(--surface-strong) !important; color: #ececf0 !important; box-shadow: none !important; }
       .btn:not(.primary):hover { background: #303038 !important; border-color: #6b6b75 !important; color: #fff !important; }
@@ -403,7 +430,8 @@
       progress { background: #34343a !important; }
       progress::-webkit-progress-bar { background: #34343a; }
       progress::-webkit-progress-value { background: var(--primary-strong); }
-      #status { min-height: 18px; margin-top: 8px; }
+      #status { min-height: 8px; margin-top: 5px; }
+      .translation-output-section { margin-top: 10px !important; }
       #historySection, [data-console-section="settings"] { background: #1d1d1f !important; border: 1px solid #3e3e45 !important; border-radius: 8px !important; box-shadow: none !important; }
       #historySection .section-title, [data-console-section="settings"] .section-title { color: #f4f4f5 !important; }
       #historySection select, #historySection input[type="date"], #historySection input[type="checkbox"] { accent-color: var(--primary-strong); }
@@ -507,6 +535,318 @@
       #historySection.reader-open .history-tools,
       #historySection.reader-open #historyStatus { display:none !important; }
       #historySection.reader-open { padding-top:12px !important; }
+
+      /* Settings console: compact two-column form inspired by the reference panel. */
+      body[data-active-tab="settings"] > .card {
+        /* Keep the shell aligned with translation/archive tabs. */
+        padding: 20px 30px 28px !important;
+      }
+      body[data-active-tab="settings"] > .card > [data-console-section="settings"] {
+        display: block !important;
+        margin: 0 !important;
+        padding: 14px 0 16px !important;
+        border: 0 !important;
+        border-bottom: 1px solid #34343a !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+      }
+      body[data-active-tab="settings"] > .card > [data-console-section="settings"]:last-of-type {
+        border-bottom: 0 !important;
+      }
+      body[data-active-tab="settings"] .switches-section {
+        padding-top: 4px !important;
+      }
+      body[data-active-tab="settings"] .section-title {
+        margin: 0 0 6px !important;
+        color: #f4f4f5 !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        letter-spacing: .1px;
+      }
+      body[data-active-tab="settings"] .switches-section > div[style*="flex-direction:column"] {
+        display: block !important;
+      }
+      body[data-active-tab="settings"] .switch-item {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: center !important;
+        gap: 14px !important;
+        min-height: 46px !important;
+        padding: 8px 0 !important;
+        border-bottom: 1px solid #303036 !important;
+      }
+      body[data-active-tab="settings"] .switch-item > div:first-child {
+        min-width: 0;
+      }
+      body[data-active-tab="settings"] .switch-item label.small,
+      body[data-active-tab="settings"] .switch-item label[for] {
+        display: block;
+        color: #f1f1f3 !important;
+        font-size: 12px !important;
+        line-height: 1.35;
+        font-weight: 600 !important;
+      }
+      body[data-active-tab="settings"] .switch-item .small[id$="Status"] {
+        display: block;
+        max-width: 250px;
+        margin-top: 3px !important;
+        color: #85858e !important;
+        font-size: 10px !important;
+        line-height: 1.35;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      body[data-active-tab="settings"] .toggle-switch {
+        width: 38px !important;
+        height: 22px !important;
+        flex: 0 0 auto;
+      }
+      body[data-active-tab="settings"] .toggle-slider {
+        border-radius: 999px !important;
+        background: #3c3c43 !important;
+        border: 1px solid #55555d;
+      }
+      body[data-active-tab="settings"] .toggle-slider:before {
+        width: 16px !important;
+        height: 16px !important;
+        top: 2px !important;
+        left: 2px !important;
+      }
+      body[data-active-tab="settings"] .toggle-switch input:checked + .toggle-slider {
+        background: #4b9ff0 !important;
+        border-color: #4b9ff0 !important;
+        box-shadow: 0 0 10px rgba(75,159,240,.22) !important;
+      }
+      body[data-active-tab="settings"] .toggle-switch input:checked + .toggle-slider:before {
+        transform: translateX(16px) !important;
+      }
+      body[data-active-tab="settings"] .switch-item > select,
+      body[data-active-tab="settings"] #sameLanguageModeSelect,
+      body[data-active-tab="settings"] #defaultEngineSelect {
+        width: 164px !important;
+        min-width: 164px !important;
+        min-height: 34px !important;
+        padding: 7px 9px !important;
+        font-size: 11px !important;
+      }
+      body[data-active-tab="settings"] .switches-section > div > div[style*="border-top"] {
+        margin-top: 6px !important;
+        padding-top: 10px !important;
+        border-top: 1px solid #34343a !important;
+      }
+      body[data-active-tab="settings"] .switches-section > div > div[style*="border-top"] > div:first-child {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) 164px !important;
+        align-items: center !important;
+        gap: 14px !important;
+        margin-bottom: 7px !important;
+      }
+      body[data-active-tab="settings"] .switches-section > div > div[style*="border-top"] .btn {
+        min-height: 30px !important;
+        padding: 5px 7px !important;
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] #engineScopeStatus {
+        margin-top: 5px !important;
+        color: #85858e !important;
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] #llmProfileDetails {
+        margin-top: 10px !important;
+        padding: 10px 0 0 !important;
+        border-top: 1px solid #34343a !important;
+      }
+      body[data-active-tab="settings"] #llmProfileDetails > summary {
+        color: #e9e9ec !important;
+        font-size: 11px !important;
+        list-style-position: inside;
+      }
+      body[data-active-tab="settings"] #llmProfileDetails > div {
+        display: grid !important;
+        grid-template-columns: 126px minmax(0, 1fr) !important;
+        align-items: center !important;
+        gap: 7px 10px !important;
+        margin-top: 9px !important;
+      }
+      body[data-active-tab="settings"] #llmProfileDetails > div > label {
+        margin: 0 !important;
+        color: #9b9ba4 !important;
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] #llmProfileDetails > div > input {
+        width: 100% !important;
+        min-height: 32px !important;
+        padding: 6px 8px !important;
+        font-size: 11px !important;
+      }
+      body[data-active-tab="settings"] #llmProfileDetails > div > div {
+        grid-column: 2;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+      }
+      body[data-active-tab="settings"] #saveLlmProfileBtn {
+        width: auto !important;
+        min-height: 30px !important;
+        padding: 5px 9px !important;
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] #llmProfileStatus {
+        color: #85858e !important;
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] #providerProfileDetails {
+        margin-top: 10px !important;
+        padding-top: 10px !important;
+        border-top: 1px solid #34343a !important;
+      }
+      body[data-active-tab="settings"] #providerProfileDetails > summary {
+        color: #e9e9ec !important;
+        font-size: 11px !important;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid {
+        grid-template-columns: 116px minmax(0, 1fr) !important;
+        align-items: start !important;
+        gap: 8px 14px !important;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > label {
+        margin: 0 !important;
+        color: #9b9ba4 !important;
+        font-size: 10px !important;
+        line-height: 1.35;
+        text-align: right;
+        white-space: nowrap;
+        padding-top: 8px !important;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > select,
+      body[data-active-tab="settings"] .provider-profile-grid > input,
+      body[data-active-tab="settings"] .provider-profile-grid > textarea {
+        grid-column: 2;
+        width: 100% !important;
+        min-height: 32px !important;
+        padding: 6px 8px !important;
+        font-size: 11px !important;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > textarea {
+        min-height: 68px !important;
+        resize: vertical;
+        line-height: 1.45;
+        scrollbar-width: thin;
+        scrollbar-color: #667482 #1b1b1e;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > textarea::-webkit-scrollbar {
+        width: 7px;
+        height: 7px;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > textarea::-webkit-scrollbar-track {
+        background: #1b1b1e;
+        border-radius: 999px;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > textarea::-webkit-scrollbar-thumb {
+        background: #667482;
+        border: 2px solid #1b1b1e;
+        border-radius: 999px;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > textarea::-webkit-scrollbar-thumb:hover {
+        background: #8fa6b8;
+      }
+      body[data-active-tab="settings"] .provider-credential-hint {
+        grid-column: 2;
+        min-width: 0;
+        color: #85858e !important;
+        font-size: 10px !important;
+        line-height: 1.35;
+      }
+      body[data-active-tab="settings"] .provider-credential-hint a {
+        color: #a9d9ff !important;
+        text-decoration: none;
+      }
+      body[data-active-tab="settings"] .provider-credential-hint a:hover {
+        color: #d5ecff !important;
+        text-decoration: underline;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > label.provider-field-prompt {
+        align-self: start !important;
+        padding-top: 8px !important;
+      }
+      body[data-active-tab="settings"] .provider-profile-actions {
+        grid-column: 1 / -1;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 8px !important;
+        min-width: 0;
+      }
+      body[data-active-tab="settings"] .provider-profile-actions .btn {
+        width: auto !important;
+        min-height: 30px !important;
+        padding: 5px 9px !important;
+        font-size: 10px !important;
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      body[data-active-tab="settings"] #providerProfileStatus {
+        order: -1;
+        margin-right: auto;
+        min-width: 0;
+        color: #85858e !important;
+        font-size: 10px !important;
+        white-space: nowrap;
+      }
+      body[data-active-tab="settings"] #providerProfileStatus[data-tone="ok"] {
+        color: #58d68d !important;
+        font-weight: 700;
+      }
+      body[data-active-tab="settings"] #providerProfileStatus[data-tone="error"] {
+        color: #ff7272 !important;
+        font-weight: 700;
+      }
+      body[data-active-tab="settings"] > .card > [data-console-section="settings"] > div:first-child > span.small,
+      body[data-active-tab="settings"] > .card > [data-console-section="settings"] > div:first-child .small {
+        color: #f1f1f3 !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+      }
+      body[data-active-tab="settings"] > .card > [data-console-section="settings"] > div:first-child {
+        margin-bottom: 9px !important;
+      }
+      body[data-active-tab="settings"] #whitelistInput {
+        min-width: 0 !important;
+        min-height: 34px !important;
+        padding: 7px 9px !important;
+        font-size: 11px !important;
+      }
+      body[data-active-tab="settings"] #addWhitelistBtn {
+        width: auto !important;
+        min-width: 48px !important;
+        min-height: 34px !important;
+        padding: 6px 10px !important;
+      }
+      body[data-active-tab="settings"] #addCurrentPageBtn {
+        min-height: 32px !important;
+        padding: 6px 9px !important;
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] #whitelistContainer {
+        max-height: 128px !important;
+        border-radius: 6px !important;
+      }
+      body[data-active-tab="settings"] [data-console-section="settings"] button,
+      body[data-active-tab="settings"] [data-console-section="settings"] a {
+        font-size: 10px !important;
+      }
+      body[data-active-tab="settings"] [data-console-section="settings"]:last-of-type > div:first-child {
+        margin-bottom: 7px !important;
+      }
+      body[data-active-tab="settings"] [data-console-section="settings"]:last-of-type > div:last-child {
+        display: block !important;
+      }
+      body[data-active-tab="settings"] [data-console-section="settings"]:last-of-type a {
+        min-height: 32px !important;
+        padding: 6px 9px !important;
+      }
     </style>
   </head>
   <body>
@@ -516,7 +856,6 @@
           <span class="brand-title">Anwara Translator</span>
           <span class="brand-version">v1.6.0</span>
         </div>
-        <span class="brand-subtitle">本地浏览器翻译</span>
       </header>
 
       <nav class="console-tabs" role="tablist" aria-label="主控制台页面">
@@ -526,9 +865,10 @@
       </nav>
 
       <!-- 页面翻译按钮 -->
-      <div id="pageActions" style="display:flex;gap:8px;margin-bottom:14px;">
-        <button id="manualPageBtn" class="btn" style="flex:1;padding:8px 12px;font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;">翻译当前网页</button>
-        <button id="restorePageBtn" class="btn" style="flex:1;padding:8px 12px;font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;">恢复原状</button>
+      <div id="pageActions" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <button id="manualPageBtn" class="btn" style="flex:1 1 calc(33.333% - 6px);min-width:0;padding:8px 8px;font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;">翻译当前网页</button>
+        <button id="structuredPageBtn" class="btn" style="flex:1 1 calc(33.333% - 6px);min-width:0;padding:8px 8px;font-size:12px;background:#e7f2f8;border:1px solid #c7dce8;color:#31566b;" title="保留网页段落和标题，打开双语阅读页">结构化阅读</button>
+        <button id="restorePageBtn" class="btn" style="flex:1 1 calc(33.333% - 6px);min-width:0;padding:8px 8px;font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;">恢复原状</button>
       </div>
 
       <div class="row">
@@ -565,7 +905,14 @@
             </svg>
             输入文本
           </label>
-          <span id="charCount" class="char-count" aria-live="polite">字数：0</span>
+          <div style="display:flex;align-items:center;gap:7px;">
+            <button id="clearInputBtn" class="icon-clear-btn" type="button" title="清空输入" aria-label="清空输入" disabled>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18"/>
+              </svg>
+            </button>
+            <span id="charCount" class="char-count" aria-live="polite">字数：0</span>
+          </div>
         </div>
         <div style="position:relative;">
           <textarea id="inputText" placeholder="请输入需要翻译的文本..."></textarea>
@@ -771,6 +1118,99 @@
               <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;border-radius:24px;transition:0.3s;"></span>
             </label>
           </div>
+
+          <div class="switch-item" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <div style="display:flex;flex-direction:column;min-width:0;">
+              <label class="small" style="color:var(--text);font-weight:500;" for="sameLanguageModeSelect">
+                同语言时的处理
+              </label>
+              <span id="sameLanguageModeStatus" class="small" style="color:var(--muted);font-size:10px;margin-top:2px;">不翻译，保留原文</span>
+            </div>
+            <select id="sameLanguageModeSelect" aria-label="同语言时的处理" style="width:150px;min-height:32px;padding:6px 8px;font-size:11px;flex:0 0 auto;">
+              <option value="skip">不翻译，保留原文</option>
+              <option value="translate">继续翻译</option>
+            </select>
+          </div>
+
+          <div style="margin-top:6px;padding-top:10px;border-top:1px solid var(--border);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+              <div style="display:flex;flex-direction:column;min-width:0;">
+                <label class="small" style="color:var(--text);font-weight:500;" for="defaultEngineSelect">默认翻译引擎</label>
+                <span id="defaultEngineStatus" class="small" style="color:var(--muted);font-size:10px;margin-top:2px;">本地翻译</span>
+              </div>
+              <select id="defaultEngineSelect" title="选择后自动保存为全局默认" aria-label="全局默认翻译引擎" style="width:150px;min-height:32px;padding:6px 8px;font-size:11px;">
+                <option value="local">本地翻译</option>
+                <option value="online">在线翻译</option>
+                <option value="llm">大模型翻译</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button id="setSiteEngineBtn" class="btn" type="button" style="flex:1;padding:6px 8px;font-size:10px;">设为当前网站默认</button>
+              <button id="clearSiteEngineBtn" class="btn" type="button" style="flex:1;padding:6px 8px;font-size:10px;">清除网站默认</button>
+            </div>
+            <div id="engineScopeStatus" class="small" style="color:var(--muted);font-size:10px;margin-top:5px;" aria-live="polite">当前网站跟随全局默认</div>
+          </div>
+
+          <details id="llmProfileDetails" class="hidden" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+            <summary class="small" style="cursor:pointer;color:var(--text);font-weight:600;">大模型接口配置</summary>
+            <div style="display:grid;gap:7px;margin-top:8px;">
+              <label class="small" for="llmBaseUrl">OpenAI 兼容 API 地址</label>
+              <input id="llmBaseUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="off" style="width:100%;min-height:30px;padding:6px 8px;font-size:11px;">
+              <label class="small" for="llmModel">模型名称</label>
+              <input id="llmModel" type="text" placeholder="模型 ID" autocomplete="off" style="width:100%;min-height:30px;padding:6px 8px;font-size:11px;">
+              <label class="small" for="llmApiKey">API Key（可选，保存在本机扩展存储）</label>
+              <input id="llmApiKey" type="password" placeholder="sk-..." autocomplete="off" style="width:100%;min-height:30px;padding:6px 8px;font-size:11px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button id="saveLlmProfileBtn" class="btn" type="button" style="padding:6px 9px;font-size:10px;">保存大模型配置</button>
+                <span id="llmProfileStatus" class="small" style="color:var(--muted);font-size:10px;" aria-live="polite">未配置</span>
+              </div>
+            </div>
+          </details>
+
+          <details id="providerProfileDetails" open style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+            <summary class="small" style="cursor:pointer;color:var(--text);font-weight:600;">翻译服务配置</summary>
+            <div class="provider-profile-grid" style="display:grid;gap:7px;margin-top:9px;">
+              <label class="small" for="providerStageSelect">服务阶段</label>
+              <select id="providerStageSelect" aria-label="服务阶段">
+                <option value="online">在线翻译</option>
+                <option value="llm">大模型翻译</option>
+              </select>
+
+              <label class="small" for="providerSelect">翻译服务</label>
+              <select id="providerSelect" aria-label="翻译服务"></select>
+
+              <label class="small provider-field provider-field-url" for="providerBaseUrl">接口地址</label>
+              <input id="providerBaseUrl" class="provider-field provider-field-url" type="url" autocomplete="off" placeholder="服务接口地址">
+
+              <label class="small provider-field provider-field-model" for="providerModel">模型名称</label>
+              <input id="providerModel" class="provider-field provider-field-model" type="text" autocomplete="off" placeholder="模型 ID">
+
+              <label class="small provider-field provider-field-key" for="providerApiKey">API Key / Token</label>
+              <input id="providerApiKey" class="provider-field provider-field-key" type="password" autocomplete="off" placeholder="仅保存在本机扩展存储">
+              <div id="providerCredentialHint" class="provider-field provider-credential-hint" aria-live="polite"></div>
+
+              <label class="small provider-field provider-field-region" for="providerRegion">区域（可选）</label>
+              <input id="providerRegion" class="provider-field provider-field-region" type="text" autocomplete="off" placeholder="例如 ap-beijing">
+
+              <label class="small provider-field provider-field-appid" for="providerAppId">App ID / Secret ID</label>
+              <input id="providerAppId" class="provider-field provider-field-appid" type="text" autocomplete="off" placeholder="App ID 或 SecretId">
+
+              <label class="small provider-field provider-field-secret" for="providerAppSecret">App Secret / Secret Key</label>
+              <input id="providerAppSecret" class="provider-field provider-field-secret" type="password" autocomplete="off" placeholder="App Secret 或 SecretKey">
+
+              <label class="small provider-field provider-field-prompt" for="providerSystemPrompt">System Prompt</label>
+              <textarea id="providerSystemPrompt" class="provider-field provider-field-prompt" rows="3" placeholder="系统提示词"></textarea>
+
+              <label class="small provider-field provider-field-prompt" for="providerUserPrompt">User Prompt</label>
+              <textarea id="providerUserPrompt" class="provider-field provider-field-prompt" rows="3" placeholder="支持 {{to}}、{{from}}、{{origin}}"></textarea>
+
+              <div class="provider-profile-actions">
+                <button id="saveProviderProfileBtn" class="btn" type="button">保存服务配置</button>
+                <button id="testProviderBtn" class="btn" type="button">测试连接</button>
+                <span id="providerProfileStatus" class="small" aria-live="polite">未配置</span>
+              </div>
+            </div>
+          </details>
         </div>
 
 
@@ -860,6 +1300,7 @@
 
         </div>
       </div>
+      <script src="i18n.js"></script>
       <script src="popup.js" type="module"></script>
     </div>
   </body>

@@ -1,10 +1,20 @@
 // popup.js - MV3 popup script using Translator and LanguageDetector APIs
 
+const uiMessage = (key, fallback, substitutions) => {
+  try {
+    return globalThis.AnwaraI18n?.t(key, fallback, substitutions) || fallback || key;
+  } catch {
+    return fallback || key;
+  }
+};
+const uiText = (value) => globalThis.AnwaraI18n?.text(value) || value;
+
 const sourceSelect = document.getElementById("sourceLang");
 const targetSelect = document.getElementById("targetLang");
 const inputEl = document.getElementById("inputText");
 const outputEl = document.getElementById("output");
 const charCountEl = document.getElementById("charCount");
+const clearInputBtn = document.getElementById('clearInputBtn');
 
 const statusEl = document.getElementById("status");
 const translateBtn = document.getElementById("translateBtn");
@@ -21,11 +31,80 @@ const selectionToggleStatus = document.getElementById("selectionToggleStatus");
 const floatingToggleStatus = document.getElementById("floatingToggleStatus");
 const selectionBilingualToggleStatus = document.getElementById("selectionBilingualToggleStatus");
 const selectionSourceToggleStatus = document.getElementById("selectionSourceToggleStatus");
+const sameLanguageModeSelect = document.getElementById('sameLanguageModeSelect');
+const sameLanguageModeStatus = document.getElementById('sameLanguageModeStatus');
+const defaultEngineSelect = document.getElementById('defaultEngineSelect');
+const defaultEngineStatus = document.getElementById('defaultEngineStatus');
+const setSiteEngineBtn = document.getElementById('setSiteEngineBtn');
+const clearSiteEngineBtn = document.getElementById('clearSiteEngineBtn');
+const engineScopeStatus = document.getElementById('engineScopeStatus');
+const llmBaseUrlInput = document.getElementById('llmBaseUrl');
+const llmModelInput = document.getElementById('llmModel');
+const llmApiKeyInput = document.getElementById('llmApiKey');
+const saveLlmProfileBtn = document.getElementById('saveLlmProfileBtn');
+const llmProfileStatus = document.getElementById('llmProfileStatus');
+const providerStageSelect = document.getElementById('providerStageSelect');
+const providerSelect = document.getElementById('providerSelect');
+const providerBaseUrlInput = document.getElementById('providerBaseUrl');
+const providerApiKeyInput = document.getElementById('providerApiKey');
+const providerModelInput = document.getElementById('providerModel');
+const providerRegionInput = document.getElementById('providerRegion');
+const providerAppIdInput = document.getElementById('providerAppId');
+const providerAppSecretInput = document.getElementById('providerAppSecret');
+const providerSystemPromptInput = document.getElementById('providerSystemPrompt');
+const providerUserPromptInput = document.getElementById('providerUserPrompt');
+const providerCredentialHint = document.getElementById('providerCredentialHint');
+const saveProviderProfileBtn = document.getElementById('saveProviderProfileBtn');
+const testProviderBtn = document.getElementById('testProviderBtn');
+const providerProfileStatus = document.getElementById('providerProfileStatus');
 
 const SELECTION_SHOW_BILINGUAL_KEY = 'translatorSelectionShowBilingual';
 const SELECTION_SHOW_SOURCE_KEY = 'translatorSelectionShowSource';
+const SAME_LANGUAGE_MODE_KEY = 'translatorSameLanguageMode';
+const TRANSLATION_ENGINE_KEY = 'translatorDefaultEngine';
+const TRANSLATION_SITE_ENGINES_KEY = 'translatorSiteDefaultEngines';
+const TRANSLATION_ENGINE_LOCAL = 'local';
+const LLM_PROFILE_KEY = 'translatorLlmProfile';
+const PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
+const ONLINE_PROVIDER_KEY = 'translatorOnlineProvider';
+const LLM_PROVIDER_KEY = 'translatorLlmProvider';
+
+const PROVIDER_DEFINITIONS = [
+  { id: 'google', stage: 'online', label: 'Google Cloud 翻译', baseUrl: 'https://translation.googleapis.com/language/translate/v2', needsKey: true, credentialUrl: 'https://console.cloud.google.com/apis/credentials', credentialLabel: '获取 Google Cloud API Key' },
+  { id: 'microsoft', stage: 'online', label: 'Microsoft 翻译', baseUrl: 'https://api.cognitive.microsofttranslator.com/translate', needsKey: true, region: true, credentialUrl: 'https://learn.microsoft.com/azure/ai-services/translator/how-to/create-translator-resource', credentialLabel: '创建 Translator 资源并获取 Key' },
+  { id: 'deepl', stage: 'online', label: 'DeepL', baseUrl: 'https://api-free.deepl.com/v2/translate', needsKey: true, credentialUrl: 'https://developers.deepl.com/docs/getting-started/managing-api-keys', credentialLabel: '管理 DeepL API Key' },
+  { id: 'deeplx', stage: 'online', label: 'DeepLX', baseUrl: 'http://localhost:1188/translate', needsKey: false, allowHttp: true, credentialNote: '无需 Key：请先启动本地 DeepLX 服务' },
+  { id: 'xiaoniu', stage: 'online', label: '小牛翻译', baseUrl: 'https://api.niutrans.com/NiuTransServer/translation', needsKey: true, credentialUrl: 'https://niutrans.com/', credentialLabel: '前往小牛翻译平台获取 Key' },
+  { id: 'youdao', stage: 'online', label: '有道翻译', baseUrl: 'https://openapi.youdao.com/api', credentials: true, credentialUrl: 'https://ai.youdao.com/', credentialLabel: '前往有道智云申请应用凭证' },
+  { id: 'tencent', stage: 'online', label: '腾讯云翻译', baseUrl: 'https://tmt.tencentcloudapi.com/', credentials: true, region: true, credentialUrl: 'https://console.cloud.tencent.com/cam/capi', credentialLabel: '前往腾讯云获取 SecretId / SecretKey' },
+  { id: 'openai', stage: 'llm', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1/chat/completions', needsKey: true, model: 'gpt-4o-mini' },
+  { id: 'deepseek', stage: 'llm', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/chat/completions', needsKey: true, model: 'deepseek-chat' },
+  { id: 'tongyi', stage: 'llm', label: '阿里通义', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', needsKey: true, model: 'qwen-plus' },
+  { id: 'zhipu', stage: 'llm', label: '智谱清言', baseUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', needsKey: true, model: 'glm-4-flash' },
+  { id: 'moonshot', stage: 'llm', label: 'Kimi / Moonshot', baseUrl: 'https://api.moonshot.cn/v1/chat/completions', needsKey: true, model: 'moonshot-v1-8k' },
+  { id: 'baichuan', stage: 'llm', label: '百川智能', baseUrl: 'https://api.baichuan-ai.com/v1/chat/completions', needsKey: true, model: 'Baichuan4-Air' },
+  { id: 'lingyi', stage: 'llm', label: '零一万物', baseUrl: 'https://api.lingyiwanwu.com/v1/chat/completions', needsKey: true, model: 'yi-lightning' },
+  { id: 'stepfun', stage: 'llm', label: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1/chat/completions', needsKey: true, model: 'step-1-8k' },
+  { id: 'hunyuan', stage: 'llm', label: '腾讯混元', baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1/chat/completions', needsKey: true, model: 'hunyuan-turbos-latest' },
+  { id: 'doubao', stage: 'llm', label: '字节豆包', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', needsKey: true, model: '' },
+  { id: 'infini', stage: 'llm', label: '无问芯穹', baseUrl: 'https://cloud.infini-ai.com/maas/v1/chat/completions', needsKey: true, model: 'qwen2.5-14b-instruct' },
+  { id: 'siliconflow', stage: 'llm', label: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1/chat/completions', needsKey: true, model: 'Qwen/Qwen2.5-7B-Instruct' },
+  { id: 'openrouter', stage: 'llm', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1/chat/completions', needsKey: true, model: 'openai/gpt-4o-mini' },
+  { id: 'groq', stage: 'llm', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1/chat/completions', needsKey: true, model: 'llama-3.3-70b-versatile' },
+  { id: 'xai', stage: 'llm', label: 'Grok / xAI', baseUrl: 'https://api.x.ai/v1/chat/completions', needsKey: true, model: 'grok-3-mini' },
+  { id: 'gemini', stage: 'llm', label: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com', needsKey: true, model: 'gemini-2.5-flash' },
+  { id: 'claude', stage: 'llm', label: 'Claude', baseUrl: 'https://api.anthropic.com/v1/messages', needsKey: true, model: 'claude-3-5-haiku-latest' },
+  { id: 'newapi', stage: 'llm', label: 'New API / 聚合接口', baseUrl: 'http://localhost:3000/v1/chat/completions', needsKey: true, model: 'gpt-4o-mini', allowHttp: true },
+  { id: 'custom', stage: 'llm', label: '自定义 OpenAI 兼容接口', baseUrl: 'http://localhost:11434/v1/chat/completions', needsKey: false, model: 'llama3.2', allowHttp: true }
+];
+let providerProfiles = {};
+let activeOnlineProvider = 'google';
+let activeLlmProvider = 'openai';
+let pendingGlobalEngineSelection = null;
+let lastGlobalEngine = TRANSLATION_ENGINE_LOCAL;
 
 const manualPageBtn = document.getElementById("manualPageBtn");
+const structuredPageBtn = document.getElementById("structuredPageBtn");
 const restorePageBtn = document.getElementById("restorePageBtn");
 const feedbackBtn = document.getElementById("feedbackBtn");
 const emailFeedbackBtn = document.getElementById("emailFeedbackBtn");
@@ -55,9 +134,16 @@ const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 const historyStatus = document.getElementById('historyStatus');
 const historyList = document.getElementById('historyList');
 const HISTORY_KEY = 'translatorHistory';
+const READING_KEY = 'translatorReadingArea';
+const VARIANTS_KEY = 'translatorTranslationVariants';
 const HISTORY_ENABLED_KEY = 'translatorHistoryEnabled';
 const AUTO_READING_KEY = 'translatorAutoAddToReading';
 let historyItems = [];
+let readingItems = [];
+let historyLoaded = false;
+let historyLoadPromise = null;
+let historyRenderLimit = 40;
+const HISTORY_RENDER_BATCH = 40;
 const archiveTabs = Array.from(document.querySelectorAll('.archive-tab'));
 const readerModeTabs = Array.from(document.querySelectorAll('.reader-mode-tab'));
 const historySection = document.getElementById('historySection');
@@ -82,6 +168,9 @@ function syncArchiveTabs(view) {
     tab.classList.toggle('is-active', isActive);
     tab.setAttribute('aria-selected', String(isActive));
   });
+  if (clearHistoryBtn) clearHistoryBtn.textContent = activeView === 'reading'
+    ? uiMessage('clearReading', '清空阅读区')
+    : uiMessage('clearHistory', '清空历史');
 }
 
 function setHistoryToolsOpen(open) {
@@ -150,7 +239,7 @@ function renderReaderContent() {
   }
 }
 
-function openReader(item, returnView = historyViewSelect?.value || 'reading') {
+function openInlineReader(item, returnView = historyViewSelect?.value || 'reading') {
   activeReaderItem = item;
   readerReturnView = returnView === 'all' ? 'all' : 'reading';
   syncArchiveTabs('reading');
@@ -160,6 +249,18 @@ function openReader(item, returnView = historyViewSelect?.value || 'reading') {
   if (readerBackBtn) readerBackBtn.textContent = readerReturnView === 'all' ? '返回历史' : '返回阅读区';
   renderReaderContent();
   readerSection?.scrollIntoView?.({ block: 'nearest' });
+}
+
+function openReader(item, returnView = historyViewSelect?.value || 'reading') {
+  if (!item?.id || !chrome?.tabs?.create) {
+    openInlineReader(item, returnView);
+    return;
+  }
+
+  const readerUrl = chrome.runtime.getURL(`reader.html?id=${encodeURIComponent(item.id)}`);
+  chrome.tabs.create({ url: readerUrl }, () => {
+    if (chrome.runtime.lastError) openInlineReader(item, returnView);
+  });
 }
 
 function closeReader() {
@@ -199,7 +300,7 @@ function adjustReaderFont(delta) {
 
 function setHistoryStatus(message, kind = '') {
   if (!historyStatus) return;
-  historyStatus.textContent = message;
+  historyStatus.textContent = uiText(message);
   historyStatus.style.color = kind === 'err' ? '#b91c1c' : kind === 'ok' ? '#047857' : 'var(--muted)';
 }
 
@@ -215,15 +316,26 @@ function formatHistoryTime(timestamp) {
 }
 
 function getFilteredHistoryItems() {
-  const view = historyViewSelect?.value || 'all';
+  const sourceItems = getActiveArchiveItems();
   const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
   const to = historyToDate?.value ? new Date(`${historyToDate.value}T23:59:59.999`).getTime() : null;
-  return historyItems.filter((item) => {
-    if (view === 'reading' && !item.inReadingArea) return false;
+  return sourceItems.filter((item) => {
     if (from !== null && item.createdAt < from) return false;
     if (to !== null && item.createdAt > to) return false;
     return true;
   });
+}
+
+function getActiveArchiveView() {
+  return historyViewSelect?.value === 'reading' ? 'reading' : 'all';
+}
+
+function getActiveArchiveItems() {
+  return getActiveArchiveView() === 'reading' ? readingItems : historyItems;
+}
+
+function getActiveArchiveLabel() {
+  return getActiveArchiveView() === 'reading' ? '阅读区' : '历史翻译';
 }
 
 function createHistoryButton(label, action, id) {
@@ -237,21 +349,24 @@ function createHistoryButton(label, action, id) {
   return button;
 }
 
-function renderHistoryList() {
+function renderHistoryList(options = {}) {
   if (!historyList) return;
+  if (!options.preserveLimit) historyRenderLimit = HISTORY_RENDER_BATCH;
   historyList.textContent = '';
   const visibleItems = getFilteredHistoryItems();
   if (!visibleItems.length) {
     const empty = document.createElement('div');
     empty.className = 'small';
-    empty.textContent = '暂无符合条件的历史翻译';
+    empty.textContent = `暂无符合条件的${getActiveArchiveLabel()}记录`;
     empty.style.cssText = 'padding:14px;text-align:center;color:var(--muted);';
     historyList.appendChild(empty);
-    setHistoryStatus(`共 ${historyItems.length} 条记录`);
+    setHistoryStatus(`共 ${getActiveArchiveItems().length} 条${getActiveArchiveLabel()}记录`);
     return;
   }
 
-  for (const item of visibleItems) {
+  const itemsToRender = visibleItems.slice(0, historyRenderLimit);
+  const fragment = document.createDocumentFragment();
+  for (const item of itemsToRender) {
     const card = document.createElement('div');
     card.className = 'history-card';
     card.style.cssText = 'padding:8px;margin-bottom:6px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;';
@@ -271,17 +386,18 @@ function renderHistoryList() {
     body.style.cssText = 'min-width:0;flex:1;';
     const source = document.createElement('div');
     source.className = 'history-card-source';
-    source.textContent = item.sourceText || '';
-    source.title = item.sourceText || '';
+    source.textContent = truncateHistoryPreview(item.sourceText);
+    source.title = '展开阅读可查看完整原文';
     source.style.cssText = 'font-size:11px;line-height:1.4;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere;max-height:58px;overflow:auto;';
     const translated = document.createElement('div');
     translated.className = 'history-card-translated';
-    translated.textContent = item.translatedText || '';
-    translated.title = item.translatedText || '';
+    translated.textContent = truncateHistoryPreview(item.translatedText);
+    translated.title = '展开阅读可查看完整译文';
     translated.style.cssText = 'margin-top:4px;font-size:11px;line-height:1.45;color:#0f766e;white-space:pre-wrap;overflow-wrap:anywhere;max-height:72px;overflow:auto;';
     const meta = document.createElement('div');
     meta.className = 'history-card-meta';
-    meta.textContent = `${formatHistoryTime(item.createdAt)} · ${item.pageTitle || item.pageUrl || ''}${item.inReadingArea ? ' · 阅读区' : ''}`;
+    const inReadingArea = isInReadingArea(item.id);
+    meta.textContent = `${formatHistoryTime(item.createdAt)} · ${item.pageTitle || item.pageUrl || ''}${inReadingArea ? ' · 阅读区' : ''}`;
     meta.style.cssText = 'margin-top:5px;font-size:10px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
     body.appendChild(source);
     body.appendChild(translated);
@@ -292,40 +408,96 @@ function renderHistoryList() {
     const actions = document.createElement('div');
     actions.className = 'history-card-actions';
     actions.style.cssText = 'display:flex;justify-content:flex-end;gap:5px;margin-top:6px;';
-    actions.appendChild(createHistoryButton(item.inReadingArea ? '移出阅读区' : '加入阅读区', 'reading', item.id));
+    actions.appendChild(createHistoryButton(inReadingArea ? '移出阅读区' : '加入阅读区', 'reading', item.id));
     actions.appendChild(createHistoryButton('展开阅读', 'reader', item.id));
     actions.appendChild(createHistoryButton('删除', 'delete', item.id));
     card.appendChild(actions);
-    historyList.appendChild(card);
+    fragment.appendChild(card);
   }
-  setHistoryStatus(`显示 ${visibleItems.length} 条，共 ${historyItems.length} 条记录`);
+  historyList.appendChild(fragment);
+  if (visibleItems.length > itemsToRender.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'history-load-more btn';
+    more.dataset.action = 'more';
+    more.textContent = `加载更多（已显示 ${itemsToRender.length}/${visibleItems.length}）`;
+    more.style.cssText = 'width:100%;margin-top:6px;padding:7px;font-size:10px;background:#25252a;border:1px solid #4a4a50;color:#a9d9ff;border-radius:6px;';
+    historyList.appendChild(more);
+  }
+  setHistoryStatus(`显示 ${itemsToRender.length}/${visibleItems.length} 条，共 ${getActiveArchiveItems().length} 条${getActiveArchiveLabel()}记录`);
 }
 
-async function loadHistoryState() {
+function isInReadingArea(id) {
+  return readingItems.some((item) => item.id === id);
+}
+
+async function loadHistoryState(options = {}) {
+  if (historyLoaded && !options.force) return;
+  if (historyLoadPromise && !options.force) return historyLoadPromise;
+  historyLoadPromise = (async () => {
+    try {
+      const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
+      historyItems = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
+      const hasReadingStore = Array.isArray(result[READING_KEY]);
+      readingItems = hasReadingStore
+        ? result[READING_KEY]
+        : historyItems.filter((item) => item?.inReadingArea === true).map((item) => ({ ...item, inReadingArea: true }));
+      if (!hasReadingStore) {
+        await chrome.storage.local.set({ [READING_KEY]: readingItems });
+      }
+      historyLoaded = true;
+      if (historyEnabledToggle) historyEnabledToggle.checked = result[HISTORY_ENABLED_KEY] !== false;
+      if (autoReadingToggle) autoReadingToggle.checked = result[AUTO_READING_KEY] === true;
+      renderHistoryList();
+    } catch (e) {
+      historyItems = [];
+      setHistoryStatus('历史记录读取失败', 'err');
+    }
+  })();
   try {
-    const result = await chrome.storage.local.get([HISTORY_KEY, HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
-    historyItems = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
-    if (historyEnabledToggle) historyEnabledToggle.checked = result[HISTORY_ENABLED_KEY] !== false;
-    if (autoReadingToggle) autoReadingToggle.checked = result[AUTO_READING_KEY] === true;
-    renderHistoryList();
-  } catch (e) {
-    historyItems = [];
-    setHistoryStatus('历史记录读取失败', 'err');
+    await historyLoadPromise;
+  } finally {
+    historyLoadPromise = null;
   }
 }
 
 async function saveHistoryItems() {
   await chrome.storage.local.set({ [HISTORY_KEY]: historyItems });
-  renderHistoryList();
+  await pruneTranslationVariants();
+  if (historyLoaded) renderHistoryList();
 }
 
-async function recordManualTranslationHistory(sourceText, translatedText, sourceLang, targetLang) {
+async function saveReadingItems() {
+  await chrome.storage.local.set({ [READING_KEY]: readingItems });
+  await pruneTranslationVariants();
+  if (historyLoaded) renderHistoryList();
+}
+
+async function pruneTranslationVariants() {
+  try {
+    const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, VARIANTS_KEY]);
+    const variants = result[VARIANTS_KEY] && typeof result[VARIANTS_KEY] === 'object' ? result[VARIANTS_KEY] : {};
+    const liveIds = new Set([
+      ...(Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : []),
+      ...(Array.isArray(result[READING_KEY]) ? result[READING_KEY] : [])
+    ].map((item) => item?.id).filter(Boolean));
+    const next = Object.fromEntries(Object.entries(variants).filter(([id]) => liveIds.has(id)));
+    if (Object.keys(next).length !== Object.keys(variants).length) {
+      await chrome.storage.local.set({ [VARIANTS_KEY]: next });
+    }
+  } catch (error) {
+    console.warn('清理孤立翻译缓存失败:', error);
+  }
+}
+
+async function recordManualTranslationHistory(sourceText, translatedText, sourceLang, targetLang, metadata = {}) {
   try {
     const settings = await chrome.storage.local.get([HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
     if (settings[HISTORY_ENABLED_KEY] === false) return;
-    const result = await chrome.storage.local.get([HISTORY_KEY]);
+    const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY]);
     const stored = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
-    stored.unshift({
+    const storedReading = Array.isArray(result[READING_KEY]) ? result[READING_KEY] : [];
+    const item = {
       id: `translation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sourceText: String(sourceText || '').replace(/\r\n?/g, '\n'),
       translatedText: String(translatedText || '').replace(/\r\n?/g, '\n'),
@@ -334,12 +506,21 @@ async function recordManualTranslationHistory(sourceText, translatedText, source
       pageUrl: '',
       pageTitle: '主功能区翻译',
       createdAt: Date.now(),
+      engineId: metadata.engineId || 'local',
+      engineStage: metadata.engineStage || 'local',
+      providerId: metadata.providerId || 'browser-translator',
       inReadingArea: settings[AUTO_READING_KEY] === true
-    });
+    };
+    stored.unshift(item);
     stored.splice(500);
     historyItems = stored;
+    if (!historyLoaded) readingItems = storedReading;
     await chrome.storage.local.set({ [HISTORY_KEY]: stored });
-    renderHistoryList();
+    if (item.inReadingArea) {
+      readingItems = [item, ...readingItems.filter((entry) => entry.id !== item.id)].slice(0, 500);
+      await chrome.storage.local.set({ [READING_KEY]: readingItems });
+    }
+    if (historyLoaded) renderHistoryList();
   } catch (e) {
     console.warn('保存主功能区翻译历史失败:', e);
   }
@@ -352,23 +533,45 @@ function getSelectedHistoryIds() {
 historyList?.addEventListener('click', async (event) => {
   const button = event.target.closest?.('button[data-action]');
   if (!button) return;
+  if (button.dataset.action === 'more') {
+    historyRenderLimit += HISTORY_RENDER_BATCH;
+    renderHistoryList({ preserveLimit: true });
+    return;
+  }
   const id = button.dataset.id;
   const index = historyItems.findIndex((item) => item.id === id);
-  if (index < 0) return;
+  const readingIndex = readingItems.findIndex((item) => item.id === id);
+  if (index < 0 && readingIndex < 0) return;
   if (button.dataset.action === 'delete') {
+    if (getActiveArchiveView() === 'reading') {
+      if (readingIndex < 0) return;
+      readingItems.splice(readingIndex, 1);
+      await saveReadingItems();
+      setHistoryStatus('已删除 1 条阅读区记录', 'ok');
+      return;
+    }
+    if (index < 0) return;
     historyItems.splice(index, 1);
     await saveHistoryItems();
     setHistoryStatus('已删除 1 条历史翻译', 'ok');
   } else if (button.dataset.action === 'reading') {
-    historyItems[index].inReadingArea = !historyItems[index].inReadingArea;
-    await saveHistoryItems();
-    setHistoryStatus(historyItems[index].inReadingArea ? '已加入阅读区' : '已移出阅读区', 'ok');
+    const item = historyItems[index] || readingItems.find((entry) => entry.id === id);
+    if (!item) return;
+    if (isInReadingArea(id)) {
+      readingItems = readingItems.filter((entry) => entry.id !== id);
+      await saveReadingItems();
+      setHistoryStatus('已移出阅读区', 'ok');
+    } else {
+      readingItems = [{ ...item, inReadingArea: true }, ...readingItems.filter((entry) => entry.id !== id)].slice(0, 500);
+      await saveReadingItems();
+      setHistoryStatus('已加入阅读区', 'ok');
+    }
   } else if (button.dataset.action === 'reader') {
-    openReader(historyItems[index], historyViewSelect?.value || 'all');
+    openReader(historyItems[index] || readingItems.find((entry) => entry.id === id), historyViewSelect?.value || 'all');
   }
 });
 
-refreshHistoryBtn?.addEventListener('click', loadHistoryState);
+refreshHistoryBtn?.addEventListener('click', () => loadHistoryState({ force: true }));
 historyManageBtn?.addEventListener('click', () => setHistoryToolsOpen(historyTools?.classList.contains('hidden')));
 historyViewSelect?.addEventListener('change', () => setHistoryView(historyViewSelect.value));
 archiveTabs.forEach((tab) => {
@@ -391,9 +594,15 @@ deleteSelectedHistoryBtn?.addEventListener('click', async () => {
     setHistoryStatus('请先选择要删除的记录', 'err');
     return;
   }
-  historyItems = historyItems.filter((item) => !selected.has(item.id));
-  await saveHistoryItems();
-  setHistoryStatus(`已删除 ${selected.size} 条历史翻译`, 'ok');
+  if (getActiveArchiveView() === 'reading') {
+    readingItems = readingItems.filter((item) => !selected.has(item.id));
+    await saveReadingItems();
+    setHistoryStatus(`已删除 ${selected.size} 条阅读区记录`, 'ok');
+  } else {
+    historyItems = historyItems.filter((item) => !selected.has(item.id));
+    await saveHistoryItems();
+    setHistoryStatus(`已删除 ${selected.size} 条历史翻译`, 'ok');
+  }
 });
 deleteDateHistoryBtn?.addEventListener('click', async () => {
   const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
@@ -406,46 +615,56 @@ deleteDateHistoryBtn?.addEventListener('click', async () => {
     setHistoryStatus('请先选择日期范围', 'err');
     return;
   }
-  const before = historyItems.length;
-  historyItems = historyItems.filter((item) => {
+  const view = getActiveArchiveView();
+  const sourceItems = getActiveArchiveItems();
+  const nextItems = sourceItems.filter((item) => {
     if (from !== null && item.createdAt < from) return true;
     if (to !== null && item.createdAt > to) return true;
     return false;
   });
-  const removed = before - historyItems.length;
+  const removed = sourceItems.length - nextItems.length;
   if (removed && window.confirm(`确定删除日期范围内的 ${removed} 条记录吗？`)) {
-    await saveHistoryItems();
-    setHistoryStatus(`已删除 ${removed} 条历史翻译`, 'ok');
+    if (view === 'reading') {
+      readingItems = nextItems;
+      await saveReadingItems();
+    } else {
+      historyItems = nextItems;
+      await saveHistoryItems();
+    }
+    setHistoryStatus(`已删除 ${removed} 条${getActiveArchiveLabel()}记录`, 'ok');
   } else if (removed) {
-    await loadHistoryState();
     setHistoryStatus('已取消删除');
   } else {
     setHistoryStatus('该日期范围没有记录');
   }
 });
 clearHistoryBtn?.addEventListener('click', async () => {
-  if (!historyItems.length) {
+  const view = getActiveArchiveView();
+  const currentItems = getActiveArchiveItems();
+  if (!currentItems.length) {
     closeReader();
     setHistoryToolsOpen(false);
-    syncArchiveTabs('all');
     renderHistoryList();
     return;
   }
-  if (!window.confirm(`确定清空全部 ${historyItems.length} 条历史翻译吗？`)) return;
+  if (!window.confirm(`确定清空全部 ${currentItems.length} 条${getActiveArchiveLabel()}记录吗？`)) return;
 
-  const previousItems = historyItems;
-  historyItems = [];
+  const previousItems = currentItems;
+  if (view === 'reading') readingItems = [];
+  else historyItems = [];
   closeReader();
   setHistoryToolsOpen(false);
-  syncArchiveTabs('all');
   try {
-    await chrome.storage.local.set({ [HISTORY_KEY]: [] });
+    if (view === 'reading') await saveReadingItems();
+    else await saveHistoryItems();
+    await pruneTranslationVariants();
     renderHistoryList();
-    setHistoryStatus('历史翻译已清空', 'ok');
+    setHistoryStatus(`${getActiveArchiveLabel()}已清空`, 'ok');
   } catch (error) {
-    historyItems = previousItems;
+    if (view === 'reading') readingItems = previousItems;
+    else historyItems = previousItems;
     renderHistoryList();
-    setHistoryStatus('清空历史翻译失败：' + String(error?.message || error || ''), 'err');
+    setHistoryStatus(`清空${getActiveArchiveLabel()}失败：` + String(error?.message || error || ''), 'err');
   }
 });
 historyEnabledToggle?.addEventListener('change', async () => {
@@ -469,9 +688,16 @@ function updateCharCount() {
   } else if (len > 500) {
     charCountEl.classList.add('warning');
   }
+  if (clearInputBtn) clearInputBtn.disabled = len === 0;
 }
 
 inputEl.addEventListener("input", updateCharCount);
+clearInputBtn?.addEventListener('click', () => {
+  inputEl.value = '';
+  updateCharCount();
+  inputEl.focus();
+  setStatus('', '');
+});
 updateCharCount();
 
 const downloadProgress = document.getElementById("downloadProgress");
@@ -537,19 +763,18 @@ async function copyOutput() {
 
 // A simple list of BCP-47 codes for demo purposes. Browsers may support a subset.
 const LANGS = [
-  ["auto", "自动检测"],
-
-  ["en", "英语"],
-  ["zh-Hans", "中文（简体 zh-Hans）"],
-  ["zh-Hant", "中文（繁体 zh-Hant）"],
-  ["ja", "日语"],
-  ["ko", "韩语"],
-  ["fr", "法语"],
-  ["de", "德语"],
-  ["es", "西班牙语"],
-  ["ru", "俄语"],
-  ["it", "意大利语"],
-  ["pt", "葡萄牙语"],
+  ["auto", uiMessage('languageAuto', "自动检测")],
+  ["en", uiMessage('languageEnglish', "英语")],
+  ["zh-Hans", `${uiMessage('languageZhHans', "简体中文")} (zh-Hans)`],
+  ["zh-Hant", `${uiMessage('languageZhHant', "繁体中文")} (zh-Hant)`],
+  ["ja", uiMessage('languageJapanese', "日语")],
+  ["ko", uiMessage('languageKorean', "韩语")],
+  ["fr", uiMessage('languageFrench', "法语")],
+  ["de", uiMessage('languageGerman', "德语")],
+  ["es", uiMessage('languageSpanish', "西班牙语")],
+  ["ru", uiMessage('languageRussian', "俄语")],
+  ["it", uiMessage('languageItalian', "意大利语")],
+  ["pt", uiMessage('languagePortuguese', "葡萄牙语")],
 ];
 
 function populateLangSelects() {
@@ -578,8 +803,331 @@ function populateLangSelects() {
 }
 
 function setStatus(msg, cls = "") {
-  statusEl.textContent = msg;
+  statusEl.textContent = uiText(msg);
   statusEl.className = `hint small ${cls}`.trim();
+}
+
+function getSiteKeyFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.origin && parsed.origin !== 'null' ? parsed.origin : parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+async function getActiveTranslationSiteKey() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return getSiteKeyFromUrl(tab?.url || '');
+}
+
+function isValidLlmBaseUrl(value) {
+  return isAllowedProviderUrl(value, true);
+}
+
+function isLlmProfileReady(profile) {
+  return providerProfileIsReady('openai', profile);
+}
+
+function getProviderDefinition(providerId) {
+  return PROVIDER_DEFINITIONS.find((item) => item.id === providerId) || null;
+}
+
+function isAllowedProviderUrl(value, allowHttp = false) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.protocol === 'https:' || (allowHttp && url.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
+function providerProfileIsReady(providerId, profile = providerProfiles[providerId] || {}) {
+  const definition = getProviderDefinition(providerId);
+  if (!definition || !isAllowedProviderUrl(profile.baseUrl || definition.baseUrl, definition.allowHttp === true)) return false;
+  if (definition.needsKey && !String(profile.apiKey || '').trim()) return false;
+  if (definition.credentials && (!String(profile.appId || '').trim() || !String(profile.appSecret || '').trim())) return false;
+  if (definition.stage === 'llm' && !String(profile.model || definition.model || '').trim()) return false;
+  return true;
+}
+
+function providerProfileDefaults(definition) {
+  return {
+    baseUrl: definition?.baseUrl || '',
+    apiKey: '',
+    model: definition?.model || '',
+    region: '',
+    appId: '',
+    appSecret: '',
+    systemPrompt: 'You are a professional translation engine. Translate only. Preserve paragraph breaks, line breaks, numbering, citation markers, URLs, and code. Do not add explanations or omit content.',
+    userPrompt: 'Translate the following text into {{to}}. Return only the translation.\n\n{{origin}}'
+  };
+}
+
+function currentProviderId() {
+  return providerSelect?.value || (providerStageSelect?.value === 'online' ? 'google' : 'openai');
+}
+
+function currentProviderStorageKey() {
+  return providerStageSelect?.value === 'online' ? ONLINE_PROVIDER_KEY : LLM_PROVIDER_KEY;
+}
+
+function setProviderProfileStatus(message, tone = 'neutral') {
+  if (!providerProfileStatus) return;
+  providerProfileStatus.textContent = message;
+  providerProfileStatus.dataset.tone = tone;
+}
+
+function renderProviderOptions(selectedId = '') {
+  if (!providerSelect) return;
+  const stage = providerStageSelect?.value || 'online';
+  providerSelect.textContent = '';
+  for (const definition of PROVIDER_DEFINITIONS.filter((item) => item.stage === stage)) {
+    const option = document.createElement('option');
+    option.value = definition.id;
+    option.textContent = definition.label;
+    providerSelect.appendChild(option);
+  }
+  const fallback = PROVIDER_DEFINITIONS.find((item) => item.stage === stage)?.id || '';
+  providerSelect.value = PROVIDER_DEFINITIONS.some((item) => item.id === selectedId && item.stage === stage) ? selectedId : fallback;
+}
+
+function setProviderFieldVisible(selector, visible) {
+  document.querySelectorAll(selector).forEach((element) => {
+    element.style.display = visible ? '' : 'none';
+  });
+}
+
+function truncateHistoryPreview(text, maxLength = 240) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}…`;
+}
+
+function renderProviderFieldVisibility(definition) {
+  const isLlm = definition?.stage === 'llm';
+  setProviderFieldVisible('.provider-field-url', true);
+  setProviderFieldVisible('.provider-field-model', isLlm);
+  setProviderFieldVisible('.provider-field-key', Boolean(definition?.needsKey));
+  setProviderFieldVisible('.provider-field-region', Boolean(definition?.region));
+  setProviderFieldVisible('.provider-field-appid', Boolean(definition?.credentials));
+  setProviderFieldVisible('.provider-field-secret', Boolean(definition?.credentials));
+  setProviderFieldVisible('.provider-field-prompt', isLlm);
+
+  if (!providerCredentialHint) return;
+  providerCredentialHint.replaceChildren();
+  if (definition?.credentialUrl) {
+    const link = document.createElement('a');
+    link.href = definition.credentialUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = definition.credentialLabel || '获取服务凭证';
+    providerCredentialHint.appendChild(link);
+    providerCredentialHint.style.display = '';
+  } else if (definition?.credentialNote) {
+    providerCredentialHint.textContent = definition.credentialNote;
+    providerCredentialHint.style.display = '';
+  } else {
+    providerCredentialHint.style.display = 'none';
+  }
+}
+
+function applyProviderProfileToInputs() {
+  const definition = getProviderDefinition(currentProviderId());
+  const profile = { ...providerProfileDefaults(definition), ...(providerProfiles[currentProviderId()] || {}) };
+  if (providerBaseUrlInput) providerBaseUrlInput.value = profile.baseUrl;
+  if (providerApiKeyInput) providerApiKeyInput.value = profile.apiKey;
+  if (providerModelInput) providerModelInput.value = profile.model;
+  if (providerRegionInput) providerRegionInput.value = profile.region;
+  if (providerAppIdInput) providerAppIdInput.value = profile.appId;
+  if (providerAppSecretInput) providerAppSecretInput.value = profile.appSecret;
+  if (providerSystemPromptInput) providerSystemPromptInput.value = profile.systemPrompt;
+  if (providerUserPromptInput) providerUserPromptInput.value = profile.userPrompt;
+  renderProviderFieldVisibility(definition);
+  if (providerApiKeyInput) {
+    providerApiKeyInput.placeholder = definition?.id === 'newapi'
+      ? uiMessage('newApiKeyPlaceholder', '粘贴 New API 控制台中的 API Key')
+      : definition?.needsKey ? uiMessage('providerKeyPlaceholder', '粘贴该服务的 API Key / Token') : uiMessage('providerKeyOptional', '此服务可不填 Key');
+  }
+  setProviderProfileStatus(providerProfileIsReady(currentProviderId(), profile) ? '可用' : '待配置', providerProfileIsReady(currentProviderId(), profile) ? 'ok' : 'neutral');
+}
+
+function readProviderProfileFromInputs() {
+  return {
+    baseUrl: String(providerBaseUrlInput?.value || '').trim().replace(/\/+$/, ''),
+    apiKey: String(providerApiKeyInput?.value || '').trim(),
+    model: String(providerModelInput?.value || '').trim(),
+    region: String(providerRegionInput?.value || '').trim(),
+    appId: String(providerAppIdInput?.value || '').trim(),
+    appSecret: String(providerAppSecretInput?.value || '').trim(),
+    systemPrompt: String(providerSystemPromptInput?.value || '').trim(),
+    userPrompt: String(providerUserPromptInput?.value || '').trim()
+  };
+}
+
+async function loadProviderProfiles() {
+  const settings = await chrome.storage.local.get([PROVIDER_PROFILES_KEY, LLM_PROFILE_KEY, ONLINE_PROVIDER_KEY, LLM_PROVIDER_KEY, TRANSLATION_ENGINE_KEY]);
+  providerProfiles = settings[PROVIDER_PROFILES_KEY] && typeof settings[PROVIDER_PROFILES_KEY] === 'object'
+    ? { ...settings[PROVIDER_PROFILES_KEY] } : {};
+  if (!providerProfiles.openai && settings[LLM_PROFILE_KEY]) providerProfiles.openai = { ...settings[LLM_PROFILE_KEY] };
+  activeOnlineProvider = settings[ONLINE_PROVIDER_KEY] || 'google';
+  activeLlmProvider = settings[LLM_PROVIDER_KEY] || 'openai';
+  const stageKey = providerStageSelect?.value === 'online' ? ONLINE_PROVIDER_KEY : LLM_PROVIDER_KEY;
+  const fallback = providerStageSelect?.value === 'online' ? activeOnlineProvider : activeLlmProvider;
+  const selected = settings[stageKey] || fallback;
+  renderProviderOptions(selected);
+  applyProviderProfileToInputs();
+  return { settings, onlineProvider: activeOnlineProvider, llmProvider: activeLlmProvider };
+}
+
+function translationEngineLabel(engineId) {
+  if (engineId === 'online') return `${uiMessage('onlineTranslation', '在线翻译')}（${uiText(getProviderDefinition(activeOnlineProvider)?.label || uiMessage('providerGoogleCloud', 'Google Cloud 翻译'))}）`;
+  if (engineId === 'llm') return `${uiMessage('llmTranslation', '大模型翻译')}（${uiText(getProviderDefinition(activeLlmProvider)?.label || 'OpenAI')}）`;
+  return uiMessage('localTranslation', '本地翻译');
+}
+
+function translationEngineStatusLabel(engineId, onlineReady, llmReady) {
+  if (engineId === 'online' && !onlineReady) return `${translationEngineLabel(engineId)}（待配置）`;
+  if (engineId === 'llm' && !llmReady) return `${translationEngineLabel(engineId)}（待配置）`;
+  return translationEngineLabel(engineId);
+}
+
+async function loadTranslationEngineSettings() {
+  const [providerState, siteKey] = await Promise.all([
+    loadProviderProfiles(),
+    getActiveTranslationSiteKey().catch(() => null)
+  ]);
+  const settings = providerState.settings;
+  const onlineProfile = providerProfiles[providerState.onlineProvider] || {};
+  const llmProfile = providerProfiles[providerState.llmProvider] || {};
+  const onlineReady = providerProfileIsReady(providerState.onlineProvider, onlineProfile);
+  const llmReady = providerProfileIsReady(providerState.llmProvider, llmProfile);
+  const siteEngines = settings[TRANSLATION_SITE_ENGINES_KEY];
+  const siteEngine = siteKey && siteEngines && typeof siteEngines === 'object' ? siteEngines[siteKey] : null;
+  // Older builds briefly stored this preference in sync storage. Prefer the
+  // local value, but migrate a valid legacy value so reopening the popup does
+  // not silently fall back to local translation.
+  let legacySyncEngine = null;
+  if (!['local', 'online', 'llm'].includes(settings[TRANSLATION_ENGINE_KEY])) {
+    try {
+      const legacy = await chrome.storage.sync.get([TRANSLATION_ENGINE_KEY]);
+      legacySyncEngine = legacy[TRANSLATION_ENGINE_KEY];
+      if (['local', 'online', 'llm'].includes(legacySyncEngine)) {
+        await chrome.storage.local.set({ [TRANSLATION_ENGINE_KEY]: legacySyncEngine });
+      }
+    } catch {}
+  }
+  const storedGlobalEngine = ['local', 'online', 'llm'].includes(settings[TRANSLATION_ENGINE_KEY])
+    ? settings[TRANSLATION_ENGINE_KEY]
+    : legacySyncEngine;
+  const persistedGlobalEngine = ['local', 'online', 'llm'].includes(storedGlobalEngine) ? storedGlobalEngine : TRANSLATION_ENGINE_LOCAL;
+  const globalEngine = pendingGlobalEngineSelection || persistedGlobalEngine;
+  lastGlobalEngine = globalEngine;
+  const effectiveEngine = ['local', 'online', 'llm'].includes(siteEngine) ? siteEngine : globalEngine;
+
+  if (llmBaseUrlInput) llmBaseUrlInput.value = llmProfile.baseUrl || '';
+  if (llmModelInput) llmModelInput.value = llmProfile.model || '';
+  if (llmApiKeyInput) llmApiKeyInput.value = llmProfile.apiKey || '';
+  if (llmProfileStatus) llmProfileStatus.textContent = llmReady
+    ? uiMessage('configuredModel', `已配置：${llmProfile.model || providerState.llmProvider}`, [llmProfile.model || providerState.llmProvider])
+    : uiMessage('notConfigured', '未配置');
+  const onlineOption = defaultEngineSelect?.querySelector('option[value="online"]');
+  const llmOption = defaultEngineSelect?.querySelector('option[value="llm"]');
+  if (onlineOption) onlineOption.disabled = false;
+  if (llmOption) llmOption.disabled = false;
+  if (defaultEngineSelect) defaultEngineSelect.value = globalEngine;
+  if (defaultEngineStatus) defaultEngineStatus.textContent = uiMessage(
+    'globalEngineStatus',
+    `全局：${translationEngineStatusLabel(globalEngine, onlineReady, llmReady)}`,
+    [translationEngineStatusLabel(globalEngine, onlineReady, llmReady)]
+  );
+  if (engineScopeStatus) {
+    engineScopeStatus.textContent = siteKey && ['local', 'online', 'llm'].includes(siteEngine)
+      ? uiMessage('siteEngineStatus', `当前网站默认：${translationEngineStatusLabel(siteEngine, onlineReady, llmReady)}`, [translationEngineStatusLabel(siteEngine, onlineReady, llmReady)])
+      : siteKey
+        ? uiMessage('siteFollowsGlobalStatus', `当前网站跟随全局默认（${translationEngineStatusLabel(effectiveEngine, onlineReady, llmReady)}）`, [translationEngineStatusLabel(effectiveEngine, onlineReady, llmReady)])
+        : uiMessage('siteDefaultUnsupported', '当前页面不支持网站级默认设置');
+  }
+}
+
+async function saveGlobalTranslationEngine(engineId) {
+  if (!['local', 'online', 'llm'].includes(engineId)) throw new Error('未知翻译引擎');
+  await chrome.storage.local.set({ [TRANSLATION_ENGINE_KEY]: engineId });
+  const stored = await chrome.storage.local.get([TRANSLATION_ENGINE_KEY]);
+  if (stored[TRANSLATION_ENGINE_KEY] !== engineId) throw new Error('全局默认翻译保存后校验失败');
+  // Remove the legacy copy so two storage areas cannot disagree later.
+  try { await chrome.storage.sync.remove([TRANSLATION_ENGINE_KEY]); } catch {}
+}
+
+async function saveLlmProfile() {
+  const profile = {
+    baseUrl: String(llmBaseUrlInput?.value || '').trim().replace(/\/+$/, ''),
+    model: String(llmModelInput?.value || '').trim(),
+    apiKey: String(llmApiKeyInput?.value || '').trim()
+  };
+  if (!isLlmProfileReady(profile)) throw new Error('请填写有效的 HTTPS API 地址和模型名称');
+  await chrome.storage.local.set({ [LLM_PROFILE_KEY]: profile });
+  if (llmProfileStatus) llmProfileStatus.textContent = uiMessage('configuredModel', `已配置：${profile.model}`, [profile.model]);
+  await loadTranslationEngineSettings();
+}
+
+async function saveProviderProfile() {
+  const providerId = currentProviderId();
+  const profile = readProviderProfileFromInputs();
+  if (!providerProfileIsReady(providerId, profile)) {
+    throw new Error('请补齐该服务所需的地址、密钥、模型或账号字段');
+  }
+  providerProfiles = { ...providerProfiles, [providerId]: profile };
+  const stageKey = currentProviderStorageKey();
+  const patch = { [PROVIDER_PROFILES_KEY]: providerProfiles, [stageKey]: providerId };
+  if (providerId === 'openai') patch[LLM_PROFILE_KEY] = { baseUrl: profile.baseUrl, model: profile.model, apiKey: profile.apiKey };
+  await chrome.storage.local.set(patch);
+  activeOnlineProvider = stageKey === ONLINE_PROVIDER_KEY ? providerId : activeOnlineProvider;
+  activeLlmProvider = stageKey === LLM_PROVIDER_KEY ? providerId : activeLlmProvider;
+  await loadTranslationEngineSettings();
+  setProviderProfileStatus('已保存', 'ok');
+}
+
+async function testProviderProfile() {
+  const providerId = currentProviderId();
+  const profile = readProviderProfileFromInputs();
+  if (!providerProfileIsReady(providerId, profile)) throw new Error('请先补齐服务配置');
+  const storedBefore = await chrome.storage.local.get([PROVIDER_PROFILES_KEY]);
+  const previousProfiles = storedBefore[PROVIDER_PROFILES_KEY] && typeof storedBefore[PROVIDER_PROFILES_KEY] === 'object'
+    ? { ...storedBefore[PROVIDER_PROFILES_KEY] }
+    : {};
+  providerProfiles = { ...providerProfiles, [providerId]: profile };
+  await chrome.storage.local.set({ [PROVIDER_PROFILES_KEY]: providerProfiles });
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'TEST_TRANSLATION_PROVIDER', providerId, targetLang: targetSelect?.value || 'zh-Hans' });
+    if (!response?.ok) throw new Error(response?.error || '测试请求失败');
+    setProviderProfileStatus('连接成功', 'ok');
+  } finally {
+    providerProfiles = previousProfiles;
+    await chrome.storage.local.set({ [PROVIDER_PROFILES_KEY]: previousProfiles });
+  }
+}
+
+async function setCurrentSiteTranslationEngine(engineId) {
+  const siteKey = await getActiveTranslationSiteKey();
+  if (!siteKey) throw new Error('当前页面不支持网站级默认设置');
+  const result = await chrome.storage.local.get([TRANSLATION_SITE_ENGINES_KEY]);
+  const siteEngines = result[TRANSLATION_SITE_ENGINES_KEY] && typeof result[TRANSLATION_SITE_ENGINES_KEY] === 'object'
+    ? { ...result[TRANSLATION_SITE_ENGINES_KEY] }
+    : {};
+  siteEngines[siteKey] = engineId;
+  await chrome.storage.local.set({ [TRANSLATION_SITE_ENGINES_KEY]: siteEngines });
+}
+
+async function clearCurrentSiteTranslationEngine() {
+  const siteKey = await getActiveTranslationSiteKey();
+  if (!siteKey) throw new Error('当前页面不支持网站级默认设置');
+  const result = await chrome.storage.local.get([TRANSLATION_SITE_ENGINES_KEY]);
+  const siteEngines = result[TRANSLATION_SITE_ENGINES_KEY] && typeof result[TRANSLATION_SITE_ENGINES_KEY] === 'object'
+    ? { ...result[TRANSLATION_SITE_ENGINES_KEY] }
+    : {};
+  delete siteEngines[siteKey];
+  await chrome.storage.local.set({ [TRANSLATION_SITE_ENGINES_KEY]: siteEngines });
 }
 
 // 白名单管理函数
@@ -920,7 +1468,17 @@ async function doTranslate() {
   }
 
   const { hasTranslator, hasDetector } = featureDetect();
-  if (!hasTranslator) {
+  const engineSettings = await chrome.storage.local.get([TRANSLATION_ENGINE_KEY, ONLINE_PROVIDER_KEY, LLM_PROVIDER_KEY]);
+  const storedEngine = engineSettings[TRANSLATION_ENGINE_KEY];
+  const selectedEngine = ['local', 'online', 'llm'].includes(storedEngine)
+    ? storedEngine
+    : (defaultEngineSelect?.value || TRANSLATION_ENGINE_LOCAL);
+  const providerId = selectedEngine === 'online'
+    ? (engineSettings[ONLINE_PROVIDER_KEY] || 'google')
+    : selectedEngine === 'llm'
+      ? (engineSettings[LLM_PROVIDER_KEY] || 'openai')
+      : 'browser-translator';
+  if (selectedEngine === TRANSLATION_ENGINE_LOCAL && !hasTranslator) {
     setStatus("当前浏览器不支持 Translator API（需要 Chrome 138+ 且安全上下文）。", "err");
     return;
   }
@@ -931,7 +1489,7 @@ async function doTranslate() {
   setStatus("正在准备翻译...", "");
 
   let sourceLanguage = sourceSelect.value;
-  const targetLanguage = targetSelect.value;
+  let targetLanguage = targetSelect.value;
 
   try {
     if (sourceLanguage === "auto") {
@@ -943,6 +1501,34 @@ async function doTranslate() {
         setStatus("自动检测不可用；将回退为英文作为来源。", "warn");
         sourceLanguage = "en";
       }
+    }
+
+    const sameLanguageMode = (await chrome.storage.sync.get([SAME_LANGUAGE_MODE_KEY]))[SAME_LANGUAGE_MODE_KEY] === 'translate' ? 'translate' : 'skip';
+    if (normalizeLang(sourceLanguage) === normalizeLang(targetLanguage)) {
+      if (sameLanguageMode === 'skip') {
+        outputEl.textContent = text;
+        setCopyEnabled(true);
+        setSpeakEnabled(true);
+        setStatus("来源语言与目标语言相同，已保留原文。", "ok");
+        return;
+      }
+      targetLanguage = getNextTargetLang(targetLanguage) || targetLanguage;
+      targetSelect.value = targetLanguage;
+      setStatus("来源语言与目标语言相同，已按设置顺延翻译。", "warn");
+    }
+
+    if (selectedEngine !== TRANSLATION_ENGINE_LOCAL) {
+      setStatus(`正在使用${translationEngineLabel(selectedEngine)}...`, '');
+      const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text, sourceLang: sourceLanguage, targetLang: targetLanguage, providerId });
+      if (!response?.ok) throw new Error(response?.error || 'PROVIDER_TRANSLATION_FAILED');
+      const translation = String(response.translation || '');
+      if (!translation.trim()) throw new Error('PROVIDER_EMPTY_RESPONSE');
+      outputEl.textContent = translation;
+      setCopyEnabled(true);
+      setSpeakEnabled(true);
+      await recordManualTranslationHistory(text, translation, sourceLanguage, targetLanguage, { engineId: selectedEngine, engineStage: selectedEngine, providerId });
+      setStatus(`完成：${translationEngineLabel(selectedEngine)}`, 'ok');
+      return;
     }
 
     const availability = await checkAvailability(sourceLanguage, targetLanguage);
@@ -1057,7 +1643,11 @@ async function doTranslate() {
     const hasText = !!(translation && translation.trim());
     setCopyEnabled(hasText);
     if (hasText) {
-      await recordManualTranslationHistory(text, translation, sourceLanguage, usedTarget);
+      await recordManualTranslationHistory(text, translation, sourceLanguage, usedTarget, {
+        engineId: selectedEngine,
+        engineStage: selectedEngine,
+        providerId
+      });
     }
 
     // 绑定朗读与复制按钮（若存在）
@@ -1121,13 +1711,15 @@ swapBtn?.addEventListener("click", () => {
       'floatingButtonEnabled',
       'autoTranslateTargetLang',
       SELECTION_SHOW_BILINGUAL_KEY,
-      SELECTION_SHOW_SOURCE_KEY
+      SELECTION_SHOW_SOURCE_KEY,
+      SAME_LANGUAGE_MODE_KEY
     ]);
     const autoEnabled = !!s.autoTranslateEnabled;
     const selectionEnabled = !!s.selectionTranslateEnabled;
     const floatingEnabled = !!s.floatingButtonEnabled;
     const showBilingual = s[SELECTION_SHOW_BILINGUAL_KEY] !== false;
     const showSource = s[SELECTION_SHOW_SOURCE_KEY] !== false;
+    const sameLanguageMode = s[SAME_LANGUAGE_MODE_KEY] === 'translate' ? 'translate' : 'skip';
 
     if (autoToggle) {
       autoToggle.checked = autoEnabled;
@@ -1149,12 +1741,18 @@ swapBtn?.addEventListener("click", () => {
       selectionSourceToggle.checked = showSource;
       updateToggleStatus(selectionSourceToggle, selectionSourceToggleStatus, showSource);
     }
+    if (sameLanguageModeSelect) sameLanguageModeSelect.value = sameLanguageMode;
+    if (sameLanguageModeStatus) sameLanguageModeStatus.textContent = sameLanguageMode === 'translate'
+      ? uiMessage('sameLanguageContinue', '同语言时继续翻译')
+      : uiMessage('sameLanguageKeepOriginal', '同语言时保留原文');
     if (s.autoTranslateTargetLang) targetSelect.value = s.autoTranslateTargetLang;
     
-    // 加载白名单和历史翻译
+    // 加载白名单和默认引擎；历史记录切到历史页时再按需加载
     await loadWhitelist();
-    await loadHistoryState();
-  } catch {}
+    await loadTranslationEngineSettings();
+  } catch (error) {
+    setStatus('设置加载失败：' + String(error?.message || error || ''), 'err');
+  }
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1279,6 +1877,121 @@ function bindSelectionDisplayToggle(toggle, status, key, label) {
 
 bindSelectionDisplayToggle(selectionBilingualToggle, selectionBilingualToggleStatus, SELECTION_SHOW_BILINGUAL_KEY, '面板显示双语');
 bindSelectionDisplayToggle(selectionSourceToggle, selectionSourceToggleStatus, SELECTION_SHOW_SOURCE_KEY, '显示翻译来源');
+sameLanguageModeSelect?.addEventListener('change', async (event) => {
+  const previous = event.target.value === 'translate' ? 'skip' : 'translate';
+  const mode = event.target.value === 'translate' ? 'translate' : 'skip';
+  try {
+    await chrome.storage.sync.set({ [SAME_LANGUAGE_MODE_KEY]: mode });
+    if (sameLanguageModeStatus) sameLanguageModeStatus.textContent = mode === 'translate'
+      ? uiMessage('sameLanguageContinue', '同语言时继续翻译')
+      : uiMessage('sameLanguageKeepOriginal', '同语言时保留原文');
+    setStatus(mode === 'translate' ? uiMessage('sameLanguageContinueStatus', '同语言时将继续翻译') : uiMessage('sameLanguageKeepOriginal', '同语言时保留原文'), 'ok');
+  } catch (error) {
+    event.target.value = previous;
+    setStatus('同语言处理设置失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+
+defaultEngineSelect?.addEventListener('change', async () => {
+  const selectedEngine = defaultEngineSelect.value;
+  const previousEngine = lastGlobalEngine;
+  pendingGlobalEngineSelection = selectedEngine;
+  try {
+    await saveGlobalTranslationEngine(selectedEngine);
+    await loadTranslationEngineSettings();
+    if (pendingGlobalEngineSelection === selectedEngine) pendingGlobalEngineSelection = null;
+    lastGlobalEngine = selectedEngine;
+    setStatus(`已更新全局默认翻译：${translationEngineLabel(selectedEngine)}`, 'ok');
+  } catch (error) {
+    if (pendingGlobalEngineSelection === selectedEngine) pendingGlobalEngineSelection = null;
+    defaultEngineSelect.value = previousEngine;
+    setStatus('默认翻译设置失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+
+saveLlmProfileBtn?.addEventListener('click', async () => {
+  try {
+    await saveLlmProfile();
+    setStatus('大模型接口配置已保存，可在默认翻译引擎中选择大模型翻译', 'ok');
+  } catch (error) {
+    if (llmProfileStatus) llmProfileStatus.textContent = '配置无效';
+    setStatus('大模型配置失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+
+providerStageSelect?.addEventListener('change', async () => {
+  const selectedId = providerStageSelect.value === 'online' ? activeOnlineProvider : activeLlmProvider;
+  renderProviderOptions(selectedId);
+  applyProviderProfileToInputs();
+});
+
+providerSelect?.addEventListener('change', () => {
+  applyProviderProfileToInputs();
+});
+
+saveProviderProfileBtn?.addEventListener('click', async () => {
+  const previous = saveProviderProfileBtn.textContent;
+  const actionButtons = [saveProviderProfileBtn, testProviderBtn].filter(Boolean);
+  actionButtons.forEach((button) => { button.disabled = true; });
+  saveProviderProfileBtn.classList.add('loading');
+  saveProviderProfileBtn.setAttribute('aria-busy', 'true');
+  setProviderProfileStatus('正在保存…', 'neutral');
+  try {
+    await saveProviderProfile();
+    setStatus(`已保存：${getProviderDefinition(currentProviderId())?.label || currentProviderId()}`, 'ok');
+  } catch (error) {
+    setProviderProfileStatus('配置不完整', 'error');
+    setStatus('翻译服务配置失败：' + String(error?.message || error || ''), 'err');
+  } finally {
+    actionButtons.forEach((button) => { button.disabled = false; });
+    saveProviderProfileBtn.classList.remove('loading');
+    saveProviderProfileBtn.removeAttribute('aria-busy');
+    saveProviderProfileBtn.textContent = previous || '保存服务配置';
+  }
+});
+
+testProviderBtn?.addEventListener('click', async () => {
+  const previous = testProviderBtn.textContent;
+  const actionButtons = [saveProviderProfileBtn, testProviderBtn].filter(Boolean);
+  actionButtons.forEach((button) => { button.disabled = true; });
+  testProviderBtn.classList.add('loading');
+  testProviderBtn.setAttribute('aria-busy', 'true');
+  testProviderBtn.textContent = '测试中…';
+  setProviderProfileStatus('正在连接…', 'neutral');
+  try {
+    await testProviderProfile();
+    setStatus('翻译服务连接测试成功', 'ok');
+  } catch (error) {
+    setProviderProfileStatus('连接失败', 'error');
+    setStatus('翻译服务测试失败：' + String(error?.message || error || ''), 'err');
+  } finally {
+    actionButtons.forEach((button) => { button.disabled = false; });
+    testProviderBtn.classList.remove('loading');
+    testProviderBtn.removeAttribute('aria-busy');
+    testProviderBtn.textContent = previous || '测试连接';
+  }
+});
+
+setSiteEngineBtn?.addEventListener('click', async () => {
+  try {
+    const engineId = defaultEngineSelect?.value || TRANSLATION_ENGINE_LOCAL;
+    await setCurrentSiteTranslationEngine(engineId);
+    await loadTranslationEngineSettings();
+    setStatus(uiMessage('setSiteEngineSuccess', `已将${translationEngineLabel(engineId)}设为当前网站默认`, [translationEngineLabel(engineId)]), 'ok');
+  } catch (error) {
+    setStatus('网站默认设置失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+
+clearSiteEngineBtn?.addEventListener('click', async () => {
+  try {
+    await clearCurrentSiteTranslationEngine();
+    await loadTranslationEngineSettings();
+    setStatus(uiMessage('siteDefaultCleared', '已清除当前网站默认，跟随全局设置'), 'ok');
+  } catch (error) {
+    setStatus('清除网站默认失败：' + String(error?.message || error || ''), 'err');
+  }
+});
 
 // 手动：翻译当前网页
 manualPageBtn?.addEventListener('click', async () => {
@@ -1291,6 +2004,28 @@ manualPageBtn?.addEventListener('click', async () => {
     setStatus('已翻译当前网页', 'ok');
   } catch (e) {
     setStatus('网页翻译失败：' + String(e?.message || e || ''), 'err');
+  }
+});
+
+// 手动：结构化翻译当前网页并打开独立阅读页
+structuredPageBtn?.addEventListener('click', async () => {
+  if (structuredPageBtn) structuredPageBtn.disabled = true;
+  try {
+    await chrome.storage.sync.set({ autoTranslateTargetLang: targetSelect.value });
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['contentScript.js'] });
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'OPEN_STRUCTURED_PAGE_READER',
+      targetLang: targetSelect.value,
+      engineId: defaultEngineSelect?.value || TRANSLATION_ENGINE_LOCAL
+    });
+    if (!response?.ok) throw new Error(response?.error || '结构化阅读未启动');
+    setStatus('已打开结构化双语阅读页', 'ok');
+  } catch (e) {
+    setStatus('结构化阅读失败：' + String(e?.message || e || ''), 'err');
+  } finally {
+    if (structuredPageBtn) structuredPageBtn.disabled = false;
   }
 });
 
@@ -1407,8 +2142,9 @@ async function updateHints() {
 sourceSelect.addEventListener("change", updateHints);
 targetSelect.addEventListener("change", updateHints);
 
+const CONSOLE_TAB_KEY = 'translatorConsoleTab';
 const consoleTabs = Array.from(document.querySelectorAll('.console-tab'));
-function setConsoleTab(tabName) {
+function setConsoleTab(tabName, persist = true) {
   const activeTab = tabName || 'translation';
   document.body.dataset.activeTab = activeTab;
   consoleTabs.forEach((tab) => {
@@ -1419,9 +2155,19 @@ function setConsoleTab(tabName) {
   if (activeTab === 'archive') {
     void loadHistoryState();
   }
+  if (persist) {
+    chrome.storage.local.set({ [CONSOLE_TAB_KEY]: activeTab }).catch(() => {});
+  }
 }
 consoleTabs.forEach((tab) => {
   tab.addEventListener('click', () => setConsoleTab(tab.dataset.tab));
 });
-setConsoleTab('translation');
+void (async () => {
+  try {
+    const result = await chrome.storage.local.get([CONSOLE_TAB_KEY]);
+    setConsoleTab(result[CONSOLE_TAB_KEY] || 'translation', false);
+  } catch {
+    setConsoleTab('translation', false);
+  }
+})();
 
