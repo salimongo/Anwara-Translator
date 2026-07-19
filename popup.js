@@ -144,6 +144,8 @@ let historyLoaded = false;
 let historyLoadPromise = null;
 let historyRenderLimit = 40;
 const HISTORY_RENDER_BATCH = 40;
+let clearConfirmView = null;
+let clearConfirmTimer = null;
 
 function normalizeStoredItems(value) {
   if (!Array.isArray(value)) return [];
@@ -153,6 +155,30 @@ function normalizeStoredItems(value) {
     typeof item.id === 'string' &&
     item.id.trim()
   ));
+}
+
+function getClearLabel(view) {
+  return view === 'reading'
+    ? uiMessage('clearReading', '清空阅读区')
+    : uiMessage('clearHistory', '清空历史');
+}
+
+function resetClearConfirmation() {
+  if (clearConfirmTimer) clearTimeout(clearConfirmTimer);
+  clearConfirmTimer = null;
+  clearConfirmView = null;
+  if (clearHistoryBtn) clearHistoryBtn.textContent = getClearLabel(getActiveArchiveView());
+}
+
+function armClearConfirmation(view, count) {
+  if (clearConfirmTimer) clearTimeout(clearConfirmTimer);
+  clearConfirmView = view;
+  if (clearHistoryBtn) clearHistoryBtn.textContent = '再次点击确认';
+  setHistoryStatus(`再点击一次“${getClearLabel(view)}”以清空 ${count} 条记录`, 'err');
+  clearConfirmTimer = setTimeout(() => {
+    resetClearConfirmation();
+    setHistoryStatus('');
+  }, 3500);
 }
 
 const archiveTabs = Array.from(document.querySelectorAll('.archive-tab'));
@@ -179,9 +205,9 @@ function syncArchiveTabs(view) {
     tab.classList.toggle('is-active', isActive);
     tab.setAttribute('aria-selected', String(isActive));
   });
-  if (clearHistoryBtn) clearHistoryBtn.textContent = activeView === 'reading'
-    ? uiMessage('clearReading', '清空阅读区')
-    : uiMessage('clearHistory', '清空历史');
+  if (clearHistoryBtn) clearHistoryBtn.textContent = clearConfirmView === activeView
+    ? '再次点击确认'
+    : getClearLabel(activeView);
 }
 
 function setHistoryToolsOpen(open) {
@@ -289,6 +315,7 @@ function closeReaderAndReturn() {
 }
 
 function setHistoryView(view) {
+  resetClearConfirmation();
   closeReader();
   syncArchiveTabs(view);
   renderHistoryList();
@@ -658,13 +685,18 @@ clearHistoryBtn?.addEventListener('click', async () => {
   const view = getActiveArchiveView();
   const currentItems = getActiveArchiveItems();
   if (!currentItems.length) {
+    resetClearConfirmation();
     setConsoleTab('translation', false);
     closeReader();
     setHistoryToolsOpen(false);
     renderHistoryList();
     return;
   }
-  if (!window.confirm(`确定清空全部 ${currentItems.length} 条${getActiveArchiveLabel()}记录吗？`)) return;
+  if (clearConfirmView !== view) {
+    armClearConfirmation(view, currentItems.length);
+    return;
+  }
+  resetClearConfirmation();
 
   const previousItems = [...currentItems];
   try {
@@ -680,6 +712,7 @@ clearHistoryBtn?.addEventListener('click', async () => {
     renderHistoryList();
     setHistoryStatus(`${getActiveArchiveLabel()}已清空`, 'ok');
   } catch (error) {
+    resetClearConfirmation();
     if (view === 'reading') readingItems = previousItems;
     else historyItems = previousItems;
     renderHistoryList();
