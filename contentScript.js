@@ -992,7 +992,8 @@
       writeHistory = true,
       writeReading = false,
       forceHistory = false,
-      transientReader = false
+      transientReader = false,
+      userApprovedReading = false
     } = options;
     if (transientReader) return createTranslationRecord(data, false);
     try {
@@ -1002,7 +1003,10 @@
       ]);
       const historyEnabled = settings[TRANSLATION_HISTORY_ENABLED_KEY] !== false;
       const shouldWriteHistory = writeHistory && (forceHistory || historyEnabled);
-      const shouldWriteReading = writeReading || (shouldWriteHistory && settings[TRANSLATION_AUTO_READING_KEY] === true);
+      const structuredReadingBlocked = Array.isArray(data?.structuredBlocks) && !userApprovedReading;
+      const shouldWriteReading = !structuredReadingBlocked && (
+        writeReading || (shouldWriteHistory && settings[TRANSLATION_AUTO_READING_KEY] === true)
+      );
       if (!shouldWriteHistory && !shouldWriteReading) return null;
 
       const result = await chrome.storage.local.get([TRANSLATION_HISTORY_KEY, TRANSLATION_READING_KEY]);
@@ -1077,7 +1081,7 @@
         engineId: panel.engineId,
         engineStage: getTranslationEngineMetadata(panel.engineId).stage,
         providerId: panel.providerId
-      }, { writeHistory: false, writeReading: true });
+      }, { writeHistory: false, writeReading: true, userApprovedReading: true });
       panel.historyId = record?.id || null;
       if (!record) panel.inReadingArea = false;
     }

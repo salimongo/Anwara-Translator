@@ -144,6 +144,17 @@ let historyLoaded = false;
 let historyLoadPromise = null;
 let historyRenderLimit = 40;
 const HISTORY_RENDER_BATCH = 40;
+
+function normalizeStoredItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => (
+    item &&
+    typeof item === 'object' &&
+    typeof item.id === 'string' &&
+    item.id.trim()
+  ));
+}
+
 const archiveTabs = Array.from(document.querySelectorAll('.archive-tab'));
 const readerModeTabs = Array.from(document.querySelectorAll('.reader-mode-tab'));
 const historySection = document.getElementById('historySection');
@@ -428,7 +439,7 @@ function renderHistoryList(options = {}) {
 }
 
 function isInReadingArea(id) {
-  return readingItems.some((item) => item.id === id);
+  return Boolean(id) && readingItems.some((item) => item?.id === id);
 }
 
 async function loadHistoryState(options = {}) {
@@ -437,10 +448,10 @@ async function loadHistoryState(options = {}) {
   historyLoadPromise = (async () => {
     try {
       const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
-      historyItems = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
+      historyItems = normalizeStoredItems(result[HISTORY_KEY]);
       const hasReadingStore = Array.isArray(result[READING_KEY]);
       readingItems = hasReadingStore
-        ? result[READING_KEY]
+        ? normalizeStoredItems(result[READING_KEY])
         : historyItems.filter((item) => item?.inReadingArea === true).map((item) => ({ ...item, inReadingArea: true }));
       if (!hasReadingStore) {
         await chrome.storage.local.set({ [READING_KEY]: readingItems });
@@ -451,6 +462,9 @@ async function loadHistoryState(options = {}) {
       renderHistoryList();
     } catch (e) {
       historyItems = [];
+      readingItems = [];
+      historyLoaded = true;
+      renderHistoryList();
       setHistoryStatus('历史记录读取失败', 'err');
     }
   })();
@@ -462,12 +476,14 @@ async function loadHistoryState(options = {}) {
 }
 
 async function saveHistoryItems() {
+  historyItems = normalizeStoredItems(historyItems);
   await chrome.storage.local.set({ [HISTORY_KEY]: historyItems });
   await pruneTranslationVariants();
   if (historyLoaded) renderHistoryList();
 }
 
 async function saveReadingItems() {
+  readingItems = normalizeStoredItems(readingItems);
   await chrome.storage.local.set({ [READING_KEY]: readingItems });
   await pruneTranslationVariants();
   if (historyLoaded) renderHistoryList();
@@ -495,8 +511,8 @@ async function recordManualTranslationHistory(sourceText, translatedText, source
     const settings = await chrome.storage.local.get([HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
     if (settings[HISTORY_ENABLED_KEY] === false) return;
     const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY]);
-    const stored = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
-    const storedReading = Array.isArray(result[READING_KEY]) ? result[READING_KEY] : [];
+    const stored = normalizeStoredItems(result[HISTORY_KEY]);
+    const storedReading = normalizeStoredItems(result[READING_KEY]);
     const item = {
       id: `translation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sourceText: String(sourceText || '').replace(/\r\n?/g, '\n'),
