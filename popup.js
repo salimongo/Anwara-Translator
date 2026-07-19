@@ -658,7 +658,6 @@ clearHistoryBtn?.addEventListener('click', async () => {
   const view = getActiveArchiveView();
   const currentItems = getActiveArchiveItems();
   if (!currentItems.length) {
-    await chrome.storage.local.set({ [CONSOLE_TAB_KEY]: 'translation' }).catch(() => {});
     setConsoleTab('translation', false);
     closeReader();
     setHistoryToolsOpen(false);
@@ -670,8 +669,8 @@ clearHistoryBtn?.addEventListener('click', async () => {
   const previousItems = [...currentItems];
   try {
     const clearPatch = view === 'reading'
-      ? { [READING_KEY]: [], [CONSOLE_TAB_KEY]: 'translation' }
-      : { [HISTORY_KEY]: [], [CONSOLE_TAB_KEY]: 'translation' };
+      ? { [READING_KEY]: [] }
+      : { [HISTORY_KEY]: [] };
     await chrome.storage.local.set(clearPatch);
     if (view === 'reading') readingItems = [];
     else historyItems = [];
