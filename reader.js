@@ -2,6 +2,7 @@
 const READING_KEY = 'translatorReadingArea';
 const VARIANTS_KEY = 'translatorTranslationVariants';
 const READER_PREFS_KEY = 'translatorReaderPreferences';
+const READER_DRAFTS_KEY = 'translatorReaderDrafts';
 const VALID_MODES = new Set(['dual', 'source', 'translated']);
 const VALID_THEMES = new Set(['paper', 'snow', 'sepia', 'graphite', 'midnight', 'forest']);
 const VALID_FONTS = new Set(['serif', 'sans', 'kai', 'system']);
@@ -614,6 +615,16 @@ async function translateReaderBlocks(blocks, engineId, providerId, sourceLang, t
 
 async function persistReaderItem() {
   if (!state.item?.id) return;
+  if (state.item.readerDraftMode === 'transient-reader') {
+    if (!chrome.storage.session) return;
+    const result = await chrome.storage.session.get([READER_DRAFTS_KEY]);
+    const drafts = result[READER_DRAFTS_KEY] && typeof result[READER_DRAFTS_KEY] === 'object'
+      ? { ...result[READER_DRAFTS_KEY] }
+      : {};
+    drafts[state.item.id] = { ...state.item, readerDraftMode: 'transient-reader', updatedAt: Date.now() };
+    await chrome.storage.session.set({ [READER_DRAFTS_KEY]: drafts });
+    return;
+  }
   const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, VARIANTS_KEY]);
   const history = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
   const readingItems = Array.isArray(result[READING_KEY]) ? result[READING_KEY] : [];
@@ -975,10 +986,18 @@ async function loadHistoryItem() {
   }
 
   try {
-    const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, VARIANTS_KEY]);
+    const [result, sessionResult] = await Promise.all([
+      chrome.storage.local.get([HISTORY_KEY, READING_KEY, VARIANTS_KEY]),
+      chrome.storage.session?.get([READER_DRAFTS_KEY]) || Promise.resolve({})
+    ]);
     const history = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
     const readingItems = Array.isArray(result[READING_KEY]) ? result[READING_KEY] : [];
-    const storedItem = readingItems.find((item) => item?.id === id) || history.find((item) => item?.id === id) || null;
+    const drafts = sessionResult[READER_DRAFTS_KEY] && typeof sessionResult[READER_DRAFTS_KEY] === 'object'
+      ? sessionResult[READER_DRAFTS_KEY]
+      : {};
+    const storedItem = drafts[id]
+      ? { ...drafts[id], readerDraftMode: 'transient-reader' }
+      : readingItems.find((item) => item?.id === id) || history.find((item) => item?.id === id) || null;
     const variantsStore = result[VARIANTS_KEY] && typeof result[VARIANTS_KEY] === 'object' ? result[VARIANTS_KEY] : {};
     const legacyVariants = storedItem?.translationVariants && typeof storedItem.translationVariants === 'object'
       ? storedItem.translationVariants

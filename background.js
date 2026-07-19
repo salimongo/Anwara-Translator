@@ -30,6 +30,8 @@ const CONTEXT_ENGINE_LABELS = {
 let contextMenuBuildPromise = null;
 const LLM_PROFILE_KEY = 'translatorLlmProfile';
 const PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
+const READER_DRAFTS_KEY = 'translatorReaderDrafts';
+const readerDraftTabs = new Map();
 
 // Provider registry follows FluentRead's service/token/model/custom-url split,
 // while keeping secrets in chrome.storage.local and requests in the worker.
@@ -426,21 +428,57 @@ async function syncRestoreMenuForTab(tabId) {
   }
 }
 
+async function storeReaderDraft(record) {
+  if (!record?.id || !chrome.storage.session) throw new Error('READER_SESSION_STORAGE_UNAVAILABLE');
+  const result = await chrome.storage.session.get([READER_DRAFTS_KEY]);
+  const drafts = result[READER_DRAFTS_KEY] && typeof result[READER_DRAFTS_KEY] === 'object'
+    ? { ...result[READER_DRAFTS_KEY] }
+    : {};
+  drafts[record.id] = { ...record, readerDraftMode: 'transient-reader', createdAt: Date.now() };
+  await chrome.storage.session.set({ [READER_DRAFTS_KEY]: drafts });
+  return record.id;
+}
+
+async function removeReaderDraft(recordId) {
+  if (!recordId || !chrome.storage.session) return;
+  const result = await chrome.storage.session.get([READER_DRAFTS_KEY]);
+  const drafts = result[READER_DRAFTS_KEY] && typeof result[READER_DRAFTS_KEY] === 'object'
+    ? { ...result[READER_DRAFTS_KEY] }
+    : {};
+  if (!drafts[recordId]) return;
+  delete drafts[recordId];
+  await chrome.storage.session.set({ [READER_DRAFTS_KEY]: drafts });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const recordId = readerDraftTabs.get(tabId);
+  readerDraftTabs.delete(tabId);
+  if (recordId) removeReaderDraft(recordId).catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === 'OPEN_READER_TAB' && message.recordId) {
-    const url = chrome.runtime.getURL(`reader.html?id=${encodeURIComponent(message.recordId)}`);
-    chrome.tabs.create({ url }, (tab) => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        sendResponse({ ok: false, error: error.message });
-        return;
-      }
-      sendResponse({ ok: true, tabId: tab?.id || null });
-    });
+  if (message?.type === 'OPEN_READER_TAB' && (message.recordId || message.record?.id)) {
+    (async () => {
+      const recordId = message.record?.id ? await storeReaderDraft(message.record) : message.recordId;
+      const url = chrome.runtime.getURL(`reader.html?id=${encodeURIComponent(recordId)}`);
+      chrome.tabs.create({ url }, (tab) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          if (message.record?.id) removeReaderDraft(recordId).catch(() => {});
+          sendResponse({ ok: false, error: error.message });
+          return;
+        }
+        if (message.record?.id && tab?.id) readerDraftTabs.set(tab.id, recordId);
+        sendResponse({ ok: true, tabId: tab?.id || null, recordId });
+      });
+    })().catch((error) => sendResponse({ ok: false, error: error?.message || 'READER_OPEN_FAILED' }));
     return true;
   }
 
   if (message?.type === 'CLOSE_READER_TAB' && sender.tab?.id) {
+    const draftId = readerDraftTabs.get(sender.tab.id);
+    readerDraftTabs.delete(sender.tab.id);
+    if (draftId) removeReaderDraft(draftId).catch(() => {});
     chrome.tabs.remove(sender.tab.id, () => {
       const error = chrome.runtime.lastError;
       sendResponse(error ? { ok: false, error: error.message } : { ok: true });

@@ -969,12 +969,32 @@
     panel.tooltip._closeButton.title = '关闭面板';
   }
 
+  function createTranslationRecord(data, inReadingArea = false) {
+    return {
+      id: `translation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sourceText: normalizeTranslationLayout(data.sourceText),
+      translatedText: normalizeTranslationLayout(data.translatedText),
+      sourceLang: data.sourceLang || 'auto',
+      targetLang: data.targetLang || 'zh-Hans',
+      pageUrl: location.href,
+      pageTitle: document.title || location.hostname,
+      createdAt: Date.now(),
+      engineId: resolveRequestedTranslationEngine(data.engineId),
+      engineStage: data.engineStage || getTranslationEngineMetadata(data.engineId).stage,
+      providerId: data.providerId || getTranslationEngineMetadata(data.engineId).providerId,
+      structuredBlocks: Array.isArray(data.structuredBlocks) ? data.structuredBlocks : null,
+      inReadingArea
+    };
+  }
+
   async function saveTranslationHistory(data, options = {}) {
     const {
       writeHistory = true,
       writeReading = false,
-      forceHistory = false
+      forceHistory = false,
+      transientReader = false
     } = options;
+    if (transientReader) return createTranslationRecord(data, false);
     try {
       const settings = await chrome.storage.local.get([
         TRANSLATION_HISTORY_ENABLED_KEY,
@@ -990,21 +1010,7 @@
       const readingItems = Array.isArray(result[TRANSLATION_READING_KEY])
         ? result[TRANSLATION_READING_KEY]
         : history.filter((entry) => entry?.inReadingArea === true);
-      const item = {
-        id: `translation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        sourceText: normalizeTranslationLayout(data.sourceText),
-        translatedText: normalizeTranslationLayout(data.translatedText),
-        sourceLang: data.sourceLang || 'auto',
-        targetLang: data.targetLang || 'zh-Hans',
-        pageUrl: location.href,
-        pageTitle: document.title || location.hostname,
-        createdAt: Date.now(),
-        engineId: resolveRequestedTranslationEngine(data.engineId),
-        engineStage: data.engineStage || getTranslationEngineMetadata(data.engineId).stage,
-        providerId: data.providerId || getTranslationEngineMetadata(data.engineId).providerId,
-        structuredBlocks: Array.isArray(data.structuredBlocks) ? data.structuredBlocks : null,
-        inReadingArea: shouldWriteReading
-      };
+      const item = createTranslationRecord(data, shouldWriteReading);
       const nextHistory = shouldWriteHistory
         ? [item, ...history.filter((entry) => entry.id !== item.id)].slice(0, MAX_HISTORY_RECORDS)
         : history;
@@ -1816,7 +1822,7 @@
       engineStage: metadata.stage,
       providerId,
       structuredBlocks: translatedBlocks
-    }, { writeHistory: false, writeReading: true });
+    }, { transientReader: true });
   }
 
   function getTextScriptStats(text) {
@@ -2909,7 +2915,7 @@
           try {
             const record = await buildStructuredPageHistory(targetLang, engineId);
             if (!record?.id) throw new Error('结构化翻译没有生成历史记录。');
-            await chrome.runtime.sendMessage({ type: 'OPEN_READER_TAB', recordId: record.id });
+            await chrome.runtime.sendMessage({ type: 'OPEN_READER_TAB', record });
             sendResponse({ ok: true, recordId: record.id });
           } finally {
             hideOverlay();
