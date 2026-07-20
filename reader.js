@@ -1,4 +1,4 @@
-﻿const HISTORY_KEY = 'translatorHistory';
+const HISTORY_KEY = 'translatorHistory';
 const READING_KEY = 'translatorReadingArea';
 const VARIANTS_KEY = 'translatorTranslationVariants';
 const READER_PREFS_KEY = 'translatorReaderPreferences';
@@ -34,12 +34,19 @@ const tocPanel = document.getElementById('tocPanel');
 const tocBackdrop = document.getElementById('tocBackdrop');
 const tocList = document.getElementById('tocList');
 const readerBackBtn = document.getElementById('readerBackBtn');
+const readerTopBtn = document.getElementById('readerTopBtn');
+const readerReadingBtn = document.getElementById('readerReadingBtn');
 const retranslateBtn = document.getElementById('retranslateBtn');
 const retranslateMenu = document.getElementById('retranslateMenu');
 const retranslateOptions = Array.from(document.querySelectorAll('.reader-engine-option'));
 const fontFamilySelect = document.getElementById('fontFamilySelect');
 const themeButtons = Array.from(document.querySelectorAll('.theme-swatch'));
 const modeTabs = Array.from(document.querySelectorAll('.mode-tab'));
+const readerSearchInput = document.getElementById('readerSearchInput');
+const readerSearchPrevBtn = document.getElementById('readerSearchPrevBtn');
+const readerSearchNextBtn = document.getElementById('readerSearchNextBtn');
+const readerSearchCount = document.getElementById('readerSearchCount');
+const readerProgressEl = document.getElementById('readerProgress');
 let tocOpen = false;
 let tocCloseTimer = null;
 let linkChoiceEl = null;
@@ -51,7 +58,23 @@ let localReaderTranslator = null;
 let localReaderTranslatorPair = '';
 const TRANSLATION_ONLINE_PROVIDER_KEY = 'translatorOnlineProvider';
 const TRANSLATION_LLM_PROVIDER_KEY = 'translatorLlmProvider';
+const TRANSLATION_TARGET_LANGUAGE_KEY = 'autoTranslateTargetLang';
 const TRANSLATION_VARIANT_LIMIT = 6;
+const READER_POSITIONS_KEY = 'translatorReaderPositions';
+const READER_PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
+const READER_PROVIDER_CREDENTIALS_KEY = 'translatorProviderCredentials';
+const READER_PROVIDER_ACTIVE_PROFILE_KEY = 'translatorProviderActiveProfileIds';
+let readerSearchMatches = [];
+let readerSearchIndex = -1;
+let readerPositionTimer = null;
+let readerReadingBusy = false;
+const READER_PROVIDER_REQUIREMENTS = {
+  google: { needsKey: true }, microsoft: { needsKey: true }, deepl: { needsKey: true }, deeplx: { allowHttp: true },
+  xiaoniu: { needsKey: true }, youdao: { credentials: true }, tencent: { credentials: true },
+  openai: { needsKey: true, llm: true }, deepseek: { needsKey: true, llm: true }, tongyi: { needsKey: true, llm: true },
+  zhipu: { needsKey: true, llm: true }, moonshot: { needsKey: true, llm: true }, gemini: { needsKey: true, llm: true },
+  claude: { needsKey: true, llm: true }, custom: { needsKey: true, llm: true, allowHttp: true }
+};
 
 const PROVIDER_LABELS = {
   google: 'Google Cloud', microsoft: 'Microsoft', deepl: 'DeepL', deeplx: 'DeepLX', xiaoniu: '小牛', youdao: '有道', tencent: '腾讯云',
@@ -543,6 +566,15 @@ function appendTextBlocks(parent, className, value, links = []) {
   });
 }
 
+async function loadReaderCurrentTargetLanguage() {
+  try {
+    const settings = await chrome.storage.sync.get([TRANSLATION_TARGET_LANGUAGE_KEY]);
+    return normalizeReaderLanguage(settings[TRANSLATION_TARGET_LANGUAGE_KEY] || 'zh-Hans');
+  } catch {
+    return 'zh-Hans';
+  }
+}
+
 async function resolveReaderProviderId(engineId) {
   if (engineId === 'local') return 'browser-translator';
   const key = engineId === 'online' ? TRANSLATION_ONLINE_PROVIDER_KEY : TRANSLATION_LLM_PROVIDER_KEY;
@@ -555,8 +587,18 @@ async function resolveReaderProviderId(engineId) {
   }
 }
 
-function getReaderVariantKey(engineId, providerId, sourceLang, targetLang) {
-  return [engineId, providerId || 'browser-translator', sourceLang || 'auto', targetLang || 'zh-Hans']
+async function resolveReaderProviderProfileKey(providerId) {
+  if (!providerId || providerId === 'browser-translator') return '';
+  try {
+    const result = await chrome.storage.local.get([READER_PROVIDER_ACTIVE_PROFILE_KEY]);
+    return result[READER_PROVIDER_ACTIVE_PROFILE_KEY]?.[providerId] || '';
+  } catch {
+    return '';
+  }
+}
+
+function getReaderVariantKey(engineId, providerId, providerProfileKey, sourceLang, targetLang) {
+  return [engineId, providerId || 'browser-translator', providerProfileKey || 'default', sourceLang || 'auto', targetLang || 'zh-Hans']
     .map((value) => String(value).trim())
     .join('|');
 }
@@ -576,7 +618,7 @@ async function mapReaderWithConcurrency(items, worker, concurrency = 2) {
   return output;
 }
 
-async function translateReaderText(text, engineId, providerId, sourceLang, targetLang) {
+async function translateReaderText(text, engineId, providerId, providerProfileKey, sourceLang, targetLang) {
   const value = String(text ?? '');
   if (!value.trim()) return value;
   if (sourceLang && targetLang && normalizeReaderLanguage(sourceLang) === normalizeReaderLanguage(targetLang)) return value;
@@ -592,13 +634,13 @@ async function translateReaderText(text, engineId, providerId, sourceLang, targe
     return await localReaderTranslator.translate(value);
   }
 
-  const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text: value, sourceLang, targetLang, providerId });
+  const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text: value, sourceLang, targetLang, providerId, profileKey: providerProfileKey });
   if (!response?.ok) throw new Error(response?.error || '翻译服务请求失败');
   return response.translation || value;
 }
 
-async function translateReaderBlocks(blocks, engineId, providerId, sourceLang, targetLang) {
-  const translateUnit = (value) => translateReaderText(value, engineId, providerId, sourceLang, targetLang);
+async function translateReaderBlocks(blocks, engineId, providerId, providerProfileKey, sourceLang, targetLang) {
+  const translateUnit = (value) => translateReaderText(value, engineId, providerId, providerProfileKey, sourceLang, targetLang);
   return mapReaderWithConcurrency(blocks, async (block) => {
     if (block?.type === 'code') return { ...block, translatedText: block.sourceText || '' };
     if (block?.type === 'list') {
@@ -657,6 +699,66 @@ async function persistReaderItem() {
   }
 }
 
+function updateReaderReadingButton() {
+  if (!readerReadingBtn) return;
+  const available = Boolean(state.item?.id);
+  const saved = state.item?.inReadingArea === true;
+  readerReadingBtn.disabled = !available || readerReadingBusy;
+  readerReadingBtn.textContent = readerReadingBusy ? '保存中…' : (saved ? '移出阅读区' : '加入阅读区');
+  readerReadingBtn.title = readerReadingBusy ? '正在保存阅读区' : (saved ? '从阅读区移出' : '加入阅读区');
+  readerReadingBtn.classList.toggle('is-active', saved);
+}
+
+async function removeReaderDraft(recordId) {
+  if (!recordId || !chrome.storage.session) return;
+  try {
+    const result = await chrome.storage.session.get([READER_DRAFTS_KEY]);
+    const drafts = result[READER_DRAFTS_KEY] && typeof result[READER_DRAFTS_KEY] === 'object'
+      ? { ...result[READER_DRAFTS_KEY] }
+      : {};
+    if (!drafts[recordId]) return;
+    delete drafts[recordId];
+    await chrome.storage.session.set({ [READER_DRAFTS_KEY]: drafts });
+  } catch {}
+}
+
+async function toggleReaderReadingArea() {
+  if (!state.item?.id || readerReadingBusy) return;
+  const next = state.item.inReadingArea !== true;
+  readerReadingBusy = true;
+  updateReaderReadingButton();
+  try {
+    const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, VARIANTS_KEY]);
+    const history = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
+    const readingItems = Array.isArray(result[READING_KEY]) ? result[READING_KEY] : [];
+    const variants = result[VARIANTS_KEY] && typeof result[VARIANTS_KEY] === 'object' ? { ...result[VARIANTS_KEY] } : {};
+    const { translationVariants, readerDraftMode, ...plainItem } = state.item;
+    const persistedItem = { ...plainItem, inReadingArea: next };
+    const historyIndex = history.findIndex((item) => item?.id === state.item.id);
+    const nextHistory = historyIndex >= 0
+      ? history.map((item) => item?.id === state.item.id ? { ...item, ...persistedItem, inReadingArea: next } : item)
+      : history;
+    const nextReading = next
+      ? [persistedItem, ...readingItems.filter((item) => item?.id !== state.item.id)].slice(0, 500)
+      : readingItems.filter((item) => item?.id !== state.item.id);
+    const patch = { [READING_KEY]: nextReading };
+    if (historyIndex >= 0) patch[HISTORY_KEY] = nextHistory;
+    if (translationVariants && typeof translationVariants === 'object' && Object.keys(translationVariants).length) {
+      variants[state.item.id] = translationVariants;
+      patch[VARIANTS_KEY] = variants;
+    }
+    await chrome.storage.local.set(patch);
+    state.item = { ...persistedItem, translationVariants: translationVariants || {} };
+    await removeReaderDraft(state.item.id);
+    setStatus(next ? '已加入阅读区。' : '已移出阅读区。', 'ok');
+  } catch (error) {
+    setStatus('阅读区保存失败：' + String(error?.message || error || ''), 'err');
+  } finally {
+    readerReadingBusy = false;
+    updateReaderReadingButton();
+  }
+}
+
 function setRetranslateMenuOpen(open) {
   if (!retranslateMenu || !retranslateBtn) return;
   const visible = Boolean(open);
@@ -667,7 +769,7 @@ function setRetranslateMenuOpen(open) {
 async function retranslateCurrentItem(engineId) {
   if (retranslateBusy || !state.item) return;
   const sourceLang = state.item.sourceLang || 'auto';
-  const targetLang = state.item.targetLang || 'zh-Hans';
+  const targetLang = await loadReaderCurrentTargetLanguage();
   if (!sourceLang || sourceLang === 'auto') {
     setStatus('当前记录没有确定的原文语言，无法重新翻译。', 'err');
     return;
@@ -680,28 +782,29 @@ async function retranslateCurrentItem(engineId) {
 
   try {
     const providerId = await resolveReaderProviderId(engineId);
-    const variantKey = getReaderVariantKey(engineId, providerId, sourceLang, targetLang);
+    const providerProfileKey = await resolveReaderProviderProfileKey(providerId);
+    const variantKey = getReaderVariantKey(engineId, providerId, providerProfileKey, sourceLang, targetLang);
     const cached = state.item.translationVariants?.[variantKey];
     setStatus(cached ? '正在读取' + readerEngineLabel(engineId, providerId) + '缓存…' : '正在使用' + readerEngineLabel(engineId, providerId) + '重新翻译…', 'note');
 
     let variant = cached;
     if (!variant) {
       const structuredBlocks = getStructuredBlocks(state.item);
-      const translatedBlocks = structuredBlocks ? await translateReaderBlocks(structuredBlocks, engineId, providerId, sourceLang, targetLang) : null;
+      const translatedBlocks = structuredBlocks ? await translateReaderBlocks(structuredBlocks, engineId, providerId, providerProfileKey, sourceLang, targetLang) : null;
       const translatedText = translatedBlocks
         ? translatedBlocks.map((block) => {
           if (block.type === 'list') return (block.items || []).map((item) => item.translatedText || '').join('\n');
           if (block.type === 'table') return (block.rows || []).map((row) => row.map((cell) => cell.translatedText || '').join(' | ')).join('\n');
           return block.translatedText || '';
         }).filter(Boolean).join('\n\n')
-        : await translateReaderText(state.item.sourceText, engineId, providerId, sourceLang, targetLang);
-      variant = { translatedText, structuredBlocks: translatedBlocks, engineId, engineStage: engineId, providerId, translatedAt: Date.now() };
+        : await translateReaderText(state.item.sourceText, engineId, providerId, providerProfileKey, sourceLang, targetLang);
+      variant = { translatedText, structuredBlocks: translatedBlocks, engineId, engineStage: engineId, providerId, providerProfileKey, translatedAt: Date.now() };
     }
 
     const variants = { ...(state.item.translationVariants || {}), [variantKey]: variant };
     const keys = Object.keys(variants);
     while (keys.length > TRANSLATION_VARIANT_LIMIT) delete variants[keys.shift()];
-    state.item = { ...state.item, translatedText: variant.translatedText, structuredBlocks: variant.structuredBlocks || state.item.structuredBlocks, engineId: variant.engineId || engineId, engineStage: variant.engineStage || engineId, providerId: variant.providerId || providerId, translationVariants: variants, updatedAt: Date.now() };
+    state.item = { ...state.item, translatedText: variant.translatedText, structuredBlocks: variant.structuredBlocks || state.item.structuredBlocks, engineId: variant.engineId || engineId, engineStage: variant.engineStage || engineId, providerId: variant.providerId || providerId, providerProfileKey: variant.providerProfileKey || providerProfileKey, translationVariants: variants, updatedAt: Date.now() };
     await persistReaderItem();
     renderMeta();
     renderContent();
@@ -872,6 +975,124 @@ function setMode(mode) {
   savePreferences();
 }
 
+
+function normalizeSearchText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
+function updateReaderSearchCount() {
+  if (!readerSearchCount) return;
+  readerSearchCount.textContent = readerSearchMatches.length
+    ? `${readerSearchIndex + 1}/${readerSearchMatches.length}`
+    : '0/0';
+}
+
+function applyReaderSearch() {
+  const query = normalizeSearchText(readerSearchInput?.value);
+  const candidates = Array.from(contentEl?.querySelectorAll('.reader-pair, .reader-single, .reader-structured-block, .reader-content section') || []);
+  candidates.forEach((element) => element.classList.remove('reader-search-match', 'reader-search-current'));
+  readerSearchMatches = query ? candidates.filter((element) => normalizeSearchText(element.textContent).includes(query)) : [];
+  readerSearchIndex = readerSearchMatches.length ? Math.min(Math.max(readerSearchIndex, 0), readerSearchMatches.length - 1) : -1;
+  if (readerSearchIndex >= 0) readerSearchMatches[readerSearchIndex].classList.add('reader-search-current');
+  readerSearchMatches.forEach((element) => element.classList.add('reader-search-match'));
+  updateReaderSearchCount();
+}
+
+function moveReaderSearch(delta) {
+  if (!readerSearchMatches.length) return;
+  readerSearchMatches[readerSearchIndex]?.classList.remove('reader-search-current');
+  readerSearchIndex = (readerSearchIndex + delta + readerSearchMatches.length) % readerSearchMatches.length;
+  const current = readerSearchMatches[readerSearchIndex];
+  current.classList.add('reader-search-current');
+  current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  updateReaderSearchCount();
+}
+
+function updateReaderProgress() {
+  const maximum = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+  if (readerProgressEl) readerProgressEl.textContent = `${Math.round(Math.min(1, Math.max(0, window.scrollY / maximum)) * 100)}%`;
+  if (readerTopBtn) readerTopBtn.disabled = window.scrollY < 80;
+}
+
+async function saveReaderPosition() {
+  if (!state.item?.id) return;
+  try {
+    const result = await chrome.storage.local.get([READER_POSITIONS_KEY]);
+    const positions = result[READER_POSITIONS_KEY] && typeof result[READER_POSITIONS_KEY] === 'object' ? { ...result[READER_POSITIONS_KEY] } : {};
+    positions[state.item.id] = { scrollY: Math.max(0, Math.round(window.scrollY)), updatedAt: Date.now() };
+    const retained = Object.entries(positions).sort((a, b) => (b[1]?.updatedAt || 0) - (a[1]?.updatedAt || 0)).slice(0, 100);
+    await chrome.storage.local.set({ [READER_POSITIONS_KEY]: Object.fromEntries(retained) });
+  } catch {}
+}
+
+function scheduleReaderPositionSave() {
+  updateReaderProgress();
+  if (!state.item?.id || readerPositionTimer) return;
+  readerPositionTimer = window.setTimeout(() => {
+    readerPositionTimer = null;
+    void saveReaderPosition();
+  }, 500);
+}
+
+function flushReaderPosition() {
+  if (readerPositionTimer) {
+    window.clearTimeout(readerPositionTimer);
+    readerPositionTimer = null;
+  }
+  void saveReaderPosition();
+}
+
+async function restoreReaderPosition() {
+  if (!state.item?.id) return;
+  try {
+    const result = await chrome.storage.local.get([READER_POSITIONS_KEY]);
+    const y = Number(result[READER_POSITIONS_KEY]?.[state.item.id]?.scrollY || 0);
+    if (y > 0) {
+      const restore = () => window.scrollTo({ top: y, behavior: 'auto' });
+      requestAnimationFrame(() => requestAnimationFrame(restore));
+      window.setTimeout(restore, 120);
+    }
+  } catch {}
+  updateReaderProgress();
+}
+
+function isSafeReaderProviderUrl(value, allowHttp) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol === 'https:') return true;
+    if (url.protocol !== 'http:') return false;
+    return Boolean(allowHttp) && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch { return false; }
+}
+
+async function refreshRetranslateOptions() {
+  let stored = {};
+  try { stored = await chrome.storage.local.get([READER_PROVIDER_PROFILES_KEY, READER_PROVIDER_CREDENTIALS_KEY, READER_PROVIDER_ACTIVE_PROFILE_KEY]); } catch {}
+  const profiles = stored[READER_PROVIDER_PROFILES_KEY] && typeof stored[READER_PROVIDER_PROFILES_KEY] === 'object' ? stored[READER_PROVIDER_PROFILES_KEY] : {};
+  const credentials = stored[READER_PROVIDER_CREDENTIALS_KEY] && typeof stored[READER_PROVIDER_CREDENTIALS_KEY] === 'object' ? stored[READER_PROVIDER_CREDENTIALS_KEY] : {};
+  const activeProfiles = stored[READER_PROVIDER_ACTIVE_PROFILE_KEY] && typeof stored[READER_PROVIDER_ACTIVE_PROFILE_KEY] === 'object' ? stored[READER_PROVIDER_ACTIVE_PROFILE_KEY] : {};
+  for (const button of retranslateOptions) {
+    const engine = button.dataset.engine;
+    if (engine === 'local') { button.disabled = false; button.title = '使用浏览器本地 Translator API'; continue; }
+    const providerId = await resolveReaderProviderId(engine);
+    const profileStorageKey = activeProfiles[providerId] || '';
+    const profile = profileStorageKey
+      ? { ...(profiles[profileStorageKey] || {}), ...(credentials[profileStorageKey] || {}) }
+      : { ...(profiles[providerId] || {}), ...(credentials[providerId] || {}) };
+    const rules = READER_PROVIDER_REQUIREMENTS[providerId] || { needsKey: true, llm: engine === 'llm' };
+    const explicitEndpoint = String(profile.baseUrl || '').trim();
+    const needsExplicitModel = providerId === 'custom';
+    const configured = (!rules.needsKey || Boolean(String(profile.apiKey || '').trim()))
+      && (!rules.credentials || (Boolean(String(profile.appId || '').trim()) && Boolean(String(profile.appSecret || '').trim())))
+      && (!needsExplicitModel || Boolean(String(profile.model || '').trim()))
+      && (!explicitEndpoint || isSafeReaderProviderUrl(explicitEndpoint, rules.allowHttp));
+    button.disabled = !configured;
+    button.title = configured
+      ? `使用 ${readerEngineLabel(engine, providerId)} 重新翻译`
+      : '尚未配置，请从工具栏打开 Anwara Translator → 设置';
+  }
+}
+
 function renderContent() {
   if (!contentEl) return;
   contentEl.textContent = '';
@@ -895,6 +1116,7 @@ function renderContent() {
       decorateRenderedCitations(element, block);
     });
     renderTableOfContents(structuredBlocks);
+    applyReaderSearch();
     return;
   }
 
@@ -921,6 +1143,7 @@ function renderContent() {
     appendTextBlocks(block, state.mode === 'source' ? 'reader-source' : 'reader-translated', state.mode === 'source' ? pair.source : pair.translated);
     contentEl.appendChild(block);
   });
+  applyReaderSearch();
 }
 
 function renderMeta() {
@@ -1013,6 +1236,7 @@ async function loadHistoryItem() {
       // Migrate old records once, removing embedded variants from both copies.
       if (Object.keys(legacyVariants).length && !Object.keys(externalVariants).length) await persistReaderItem();
       renderMeta();
+      updateReaderReadingButton();
     }
     renderContent();
   } catch (error) {
@@ -1042,9 +1266,10 @@ async function copyTranslated() {
 }
 
 let closeRequested = false;
-function closeReader() {
+async function closeReader() {
   if (closeRequested) return;
   closeRequested = true;
+  await saveReaderPosition();
   try {
     chrome.runtime.sendMessage({ type: 'CLOSE_READER_TAB' }, (response) => {
       if (chrome.runtime.lastError || !response?.ok) window.close();
@@ -1073,8 +1298,12 @@ document.getElementById('fontIncreaseBtn')?.addEventListener('click', () => {
   savePreferences();
 });
 document.getElementById('copyTranslatedBtn')?.addEventListener('click', copyTranslated);
+readerReadingBtn?.addEventListener('click', () => void toggleReaderReadingArea());
 document.getElementById('closeReaderBtn')?.addEventListener('click', closeReader);
-retranslateBtn?.addEventListener('click', () => setRetranslateMenuOpen(retranslateMenu?.hidden));
+retranslateBtn?.addEventListener('click', async () => {
+  await refreshRetranslateOptions();
+  setRetranslateMenuOpen(retranslateMenu?.hidden);
+});
 retranslateOptions.forEach((button) => {
   button.addEventListener('click', () => retranslateCurrentItem(button.dataset.engine));
 });
@@ -1082,6 +1311,18 @@ document.addEventListener('pointerdown', (event) => {
   if (!retranslateMenu?.hidden && !retranslateMenu.contains(event.target) && event.target !== retranslateBtn) setRetranslateMenuOpen(false);
 });
 readerBackBtn?.addEventListener('click', returnToReaderPosition);
+readerSearchInput?.addEventListener('input', () => { readerSearchIndex = 0; applyReaderSearch(); });
+readerSearchInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); moveReaderSearch(event.shiftKey ? -1 : 1); }
+});
+readerSearchPrevBtn?.addEventListener('click', () => moveReaderSearch(-1));
+readerSearchNextBtn?.addEventListener('click', () => moveReaderSearch(1));
+readerTopBtn?.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+window.addEventListener('scroll', scheduleReaderPositionSave, { passive: true });
+window.addEventListener('pagehide', flushReaderPosition);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushReaderPosition();
+});
 updateReaderBackButton();
 tocToggleBtn?.addEventListener('click', () => setTocOpen(!tocOpen));
 tocCloseBtn?.addEventListener('click', () => setTocOpen(false));
@@ -1102,4 +1343,6 @@ document.addEventListener('keydown', (event) => {
 (async function init() {
   await loadPreferences();
   await loadHistoryItem();
+  await refreshRetranslateOptions();
+  await restoreReaderPosition();
 })();

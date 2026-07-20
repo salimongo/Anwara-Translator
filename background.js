@@ -6,6 +6,7 @@ const KEY = {
   whitelist: 'whitelistPatterns',
 };
 
+const CONTENT_SCRIPT_VERSION = '1.6.15';
 const CONTEXT_MENU_ROOT_ID = 'translator-context-root';
 const CONTEXT_MENU_STRUCTURED_READER_ID = 'translator-structured-reader';
 const CONTEXT_MENU_RESTORE_ID = 'translator-restore-page';
@@ -30,6 +31,8 @@ const CONTEXT_ENGINE_LABELS = {
 let contextMenuBuildPromise = null;
 const LLM_PROFILE_KEY = 'translatorLlmProfile';
 const PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
+const PROVIDER_CREDENTIALS_KEY = 'translatorProviderCredentials';
+const PROVIDER_ACTIVE_PROFILE_KEY = 'translatorProviderActiveProfileIds';
 const READER_DRAFTS_KEY = 'translatorReaderDrafts';
 const readerDraftTabs = new Map();
 
@@ -156,14 +159,38 @@ async function hmacSha256(key, message) {
   return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(message));
 }
 
-async function translateWithProvider(text, sourceLang, targetLang, providerId) {
-  const input = String(text || '').trim();
-  if (!input) return '';
-  const settings = await chrome.storage.local.get([PROVIDER_PROFILES_KEY, LLM_PROFILE_KEY]);
+function resolveStoredProviderProfile(settings, providerId, requestedProfileKey = '') {
   const storedProfiles = settings[PROVIDER_PROFILES_KEY] && typeof settings[PROVIDER_PROFILES_KEY] === 'object'
     ? settings[PROVIDER_PROFILES_KEY] : {};
-  let rawProfile = storedProfiles[providerId] || {};
-  if (providerId === 'openai' && !Object.keys(rawProfile).length && settings[LLM_PROFILE_KEY]) rawProfile = settings[LLM_PROFILE_KEY];
+  const storedCredentials = settings[PROVIDER_CREDENTIALS_KEY] && typeof settings[PROVIDER_CREDENTIALS_KEY] === 'object'
+    ? settings[PROVIDER_CREDENTIALS_KEY] : {};
+  const activeProfiles = settings[PROVIDER_ACTIVE_PROFILE_KEY] && typeof settings[PROVIDER_ACTIVE_PROFILE_KEY] === 'object'
+    ? settings[PROVIDER_ACTIVE_PROFILE_KEY] : {};
+  const preferredKey = requestedProfileKey || activeProfiles[providerId] || '';
+  let storageKey = preferredKey && storedProfiles[preferredKey]?.providerId === providerId ? preferredKey : '';
+  if (!storageKey) {
+    storageKey = Object.entries(storedProfiles)
+      .find(([, profile]) => profile?.providerId === providerId)?.[0] || '';
+  }
+  if (storageKey) {
+    return {
+      profileKey: storageKey,
+      profile: { ...storedProfiles[storageKey], ...(storedCredentials[storageKey] || {}) }
+    };
+  }
+  const legacyProfile = {
+    ...(providerId === 'openai' && settings[LLM_PROFILE_KEY] ? settings[LLM_PROFILE_KEY] : {}),
+    ...(storedProfiles[providerId] || {}),
+    ...(storedCredentials[providerId] || {})
+  };
+  return { profileKey: '', profile: legacyProfile };
+}
+
+async function translateWithProvider(text, sourceLang, targetLang, providerId, profileKey = '') {
+  const input = String(text || '').trim();
+  if (!input) return '';
+  const settings = await chrome.storage.local.get([PROVIDER_PROFILES_KEY, PROVIDER_CREDENTIALS_KEY, PROVIDER_ACTIVE_PROFILE_KEY, LLM_PROFILE_KEY]);
+  const { profile: rawProfile } = resolveStoredProviderProfile(settings, providerId, profileKey);
   const profile = validateProviderProfile(providerId, rawProfile);
   const definition = getProviderDefinition(providerId);
   const source = sourceLang || 'auto';
@@ -461,17 +488,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const recordId = message.record?.id ? await storeReaderDraft(message.record) : message.recordId;
       const url = chrome.runtime.getURL(`reader.html?id=${encodeURIComponent(recordId)}`);
-      chrome.tabs.create({ url }, (tab) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          if (message.record?.id) removeReaderDraft(recordId).catch(() => {});
-          sendResponse({ ok: false, error: error.message });
-          return;
+      const tabs = await chrome.tabs.query({});
+      const existing = tabs.find((tab) => {
+        try {
+          const candidate = new URL(tab.url || '');
+          return candidate.origin === new URL(url).origin
+            && candidate.pathname.endsWith('/reader.html')
+            && candidate.searchParams.get('id') === recordId;
+        } catch {
+          return false;
         }
-        if (message.record?.id && tab?.id) readerDraftTabs.set(tab.id, recordId);
-        sendResponse({ ok: true, tabId: tab?.id || null, recordId });
       });
-    })().catch((error) => sendResponse({ ok: false, error: error?.message || 'READER_OPEN_FAILED' }));
+      if (existing?.id) {
+        await chrome.tabs.update(existing.id, { active: true });
+        if (existing.windowId) await chrome.windows.update(existing.windowId, { focused: true });
+        sendResponse({ ok: true, reused: true, tabId: existing.id, recordId });
+        return;
+      }
+      const tab = await chrome.tabs.create({ url });
+      if (message.record?.id && tab?.id) readerDraftTabs.set(tab.id, recordId);
+      sendResponse({ ok: true, reused: false, tabId: tab?.id || null, recordId });
+    })().catch((error) => {
+      if (message.record?.id) removeReaderDraft(message.record.id).catch(() => {});
+      sendResponse({ ok: false, error: error?.message || 'READER_OPEN_FAILED' });
+    });
     return true;
   }
 
@@ -494,14 +534,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'TRANSLATE_WITH_PROVIDER') {
-    translateWithProvider(message.text, message.sourceLang, message.targetLang, message.providerId)
+    translateWithProvider(message.text, message.sourceLang, message.targetLang, message.providerId, message.profileKey || message.profileId)
       .then((translation) => sendResponse({ ok: true, translation }))
       .catch((error) => sendResponse({ ok: false, error: error?.message || 'PROVIDER_TRANSLATION_FAILED' }));
     return true;
   }
 
   if (message?.type === 'TEST_TRANSLATION_PROVIDER') {
-    translateWithProvider('Hello, this is a provider connection test.', 'en', message.targetLang || 'zh-Hans', message.providerId)
+    translateWithProvider('Hello, this is a provider connection test.', 'en', message.targetLang || 'zh-Hans', message.providerId, message.profileKey || message.profileId)
       .then((translation) => sendResponse({ ok: true, translation }))
       .catch((error) => sendResponse({ ok: false, error: error?.message || 'PROVIDER_TEST_FAILED' }));
     return true;
@@ -515,16 +555,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 createContextMenus().then(async () => {
   try {
     const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (activeTabs[0]?.id) await syncRestoreMenuForTab(activeTabs[0].id);
+    if (activeTabs[0]?.id) {
+      await ensureContentScript(activeTabs[0].id).catch(() => {});
+      await syncRestoreMenuForTab(activeTabs[0].id);
+    }
   } catch {}
 });
 
 async function ensureContentScript(tabId) {
+  let status = null;
   try {
-    const status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
-    if (status?.ok) return;
+    status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+    if (status?.ok && status.version === CONTENT_SCRIPT_VERSION) return { ...status, ready: true };
   } catch {}
   await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+  try {
+    status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+  } catch {}
+  return { ...status, ready: status?.version === CONTENT_SCRIPT_VERSION, refreshRequired: status?.ok === true && status?.version !== CONTENT_SCRIPT_VERSION };
 }
 
 // 检查URL是否在白名单中
@@ -606,7 +654,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!/^https?:|^file:|^chrome-extension:/.test(url)) return;
 
   try {
-    await ensureContentScript(tab.id);
+    const contentStatus = await ensureContentScript(tab.id);
+    if (!contentStatus?.ready) {
+      console.warn('Current page needs a refresh before using the updated selection translator.');
+      return;
+    }
     const settings = await chrome.storage.sync.get([KEY.target]);
     const targetLang = settings[KEY.target] || 'zh-Hans';
     const hasSelection = Boolean(info.selectionText?.trim());
@@ -633,6 +685,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   } catch (e) {
     console.warn('Context-menu action failed:', e);
   }
+});
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (/^https?:|^file:/.test(tab?.url || '')) await ensureContentScript(tabId);
+  } catch {}
 });
 
 // When a tab finishes loading and auto-translate is on, inject and start translation

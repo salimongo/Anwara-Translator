@@ -12,7 +12,7 @@
 
 English documentation: [README.en.md](README.en.md)
 
-Anwara Translator 是一个基于浏览器内置 Translator API 与 Language Detector API 的本地翻译扩展，支持文本、网页和选句翻译，并提供双语面板、历史记录与阅读区。翻译在本地完成，首次使用可能需要下载浏览器模型。
+Anwara Translator 是一个 Chrome / Edge MV3 翻译扩展，支持文本、网页与选句翻译，并提供双语面板、历史记录、阅读区和结构化阅读页。默认使用浏览器内置 Translator API 与 Language Detector API 在本地翻译；也可由用户自行配置在线翻译或大模型接口。
 
 ## 下载与安装
 
@@ -35,8 +35,18 @@ Anwara Translator 是一个基于浏览器内置 Translator API 与 Language Det
 - 保留译文中的段落、换行和缩进排版，避免多行内容粘成一块
 - 划词面板支持固定、多开、拖动和调整大小，布局按网站记忆
 - 成功翻译默认写入本地历史，可单独加入阅读区并批量清理
+- 历史与阅读区支持搜索、翻译方式/站点筛选、仅展示用的重复合并、批量删除、日期删除和 8 秒撤销
+- 同一条记录重复打开时复用已有阅读页，避免堆出一串重复标签页
+- 独立阅读页支持页内搜索、阅读进度、断点续读、主题/字体/字号以及本地、在线、大模型重新翻译
+- 未配置的在线或大模型重新翻译会明确禁用并提示前往设置，而不会发起失败请求
 - 增加漂浮翻译开关
 - ✨ **网址白名单功能**：开启自动翻译网页后，可跳过白名单内的网址。
+
+## 翻译方式与数据边界
+
+- **本地翻译**：使用浏览器 Translator API；模型可能在首次使用时由浏览器下载。
+- **在线翻译 / 大模型翻译**：需要用户在“设置”中填写对应服务的 Key、端点、模型或账号凭证；选中的文本或网页内容会直接发送给所选服务商。
+- 配置和历史记录仅保存在浏览器扩展本地存储中；仓库和发布包不包含用户 Key、Token 或个人翻译数据。
 
 ## 运行要求
 - Chrome 或 Edge 版本：138+（支持 Translator 与 LanguageDetector）
@@ -76,10 +86,8 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 ## 隐私政策
 
-Translator 是开源软件。我们尊重您的隐私权。我们不会采集您的任何数据，所有数据均在您的本地进行使用，不会将您的数据提供给任何人。
+Anwara Translator 不收集分析数据，也不向项目自有服务上传内容。本地翻译会留在浏览器内；历史、阅读区与服务配置保存在浏览器扩展本地存储中。
 
-当然，您不必听信我们的一家之言。您可以通过阅读源代码来了解 Anwara Translator(https://github.com/salimongo/Anwara-Translator/) 的具体行为，或者咨询该方面的专业人士。
+若你主动配置在线翻译或大模型服务，所选文本或网页内容会直接发送至该服务商，并受该服务商的隐私政策约束。请勿在未确认服务商数据政策前处理敏感内容。
 
-Translator is open source software. We respect your privacy rights. We will not collect any data from you, all data will be used locally, and your data will not be provided to anyone.
-
-Of course, you don't have to listen to our family. You can read the source code to learn about the specific behavior of Anwara Translator(https://github.com/salimongo/Anwara-Translator/), or consult a professional in the field.
+你可以通过阅读源代码了解 [Anwara Translator](https://github.com/salimongo/Anwara-Translator/) 的具体行为，或自行审查扩展权限和服务配置。

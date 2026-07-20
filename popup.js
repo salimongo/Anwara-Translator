@@ -31,6 +31,14 @@ const selectionToggleStatus = document.getElementById("selectionToggleStatus");
 const floatingToggleStatus = document.getElementById("floatingToggleStatus");
 const selectionBilingualToggleStatus = document.getElementById("selectionBilingualToggleStatus");
 const selectionSourceToggleStatus = document.getElementById("selectionSourceToggleStatus");
+const selectionPanelDefaultWidthInput = document.getElementById('selectionPanelDefaultWidth');
+const selectionPanelDefaultHeightInput = document.getElementById('selectionPanelDefaultHeight');
+const selectionPanelDefaultSizeSaveBtn = document.getElementById('selectionPanelDefaultSizeSaveBtn');
+const selectionPanelDefaultSizeResetBtn = document.getElementById('selectionPanelDefaultSizeResetBtn');
+const selectionPanelSizePresetButtons = Array.from(document.querySelectorAll('.panel-size-preset'));
+const selectionPanelUseGlobalSizeToggle = document.getElementById('selectionPanelUseGlobalSizeToggle');
+const selectionPanelRememberSiteSizeToggle = document.getElementById('selectionPanelRememberSiteSizeToggle');
+const openPanelSizeTunerBtn = document.getElementById('openPanelSizeTunerBtn');
 const sameLanguageModeSelect = document.getElementById('sameLanguageModeSelect');
 const sameLanguageModeStatus = document.getElementById('sameLanguageModeStatus');
 const defaultEngineSelect = document.getElementById('defaultEngineSelect');
@@ -45,6 +53,11 @@ const saveLlmProfileBtn = document.getElementById('saveLlmProfileBtn');
 const llmProfileStatus = document.getElementById('llmProfileStatus');
 const providerStageSelect = document.getElementById('providerStageSelect');
 const providerSelect = document.getElementById('providerSelect');
+const providerProfileList = document.getElementById('providerProfileList');
+const providerProfileNameInput = document.getElementById('providerProfileName');
+const newProviderProfileBtn = document.getElementById('newProviderProfileBtn');
+const duplicateProviderProfileBtn = document.getElementById('duplicateProviderProfileBtn');
+const deleteProviderProfileBtn = document.getElementById('deleteProviderProfileBtn');
 const providerBaseUrlInput = document.getElementById('providerBaseUrl');
 const providerApiKeyInput = document.getElementById('providerApiKey');
 const providerModelInput = document.getElementById('providerModel');
@@ -61,11 +74,23 @@ const providerProfileStatus = document.getElementById('providerProfileStatus');
 const SELECTION_SHOW_BILINGUAL_KEY = 'translatorSelectionShowBilingual';
 const SELECTION_SHOW_SOURCE_KEY = 'translatorSelectionShowSource';
 const SAME_LANGUAGE_MODE_KEY = 'translatorSameLanguageMode';
+const SELECTION_PANEL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelDefaultSize';
+const SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelUseGlobalDefaultSize';
+const SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY = 'translatorSelectionPanelRememberSiteSize';
+const MIN_SELECTION_PANEL_WIDTH = 240;
+const MIN_SELECTION_PANEL_HEIGHT = 180;
+const MAX_SELECTION_PANEL_WIDTH = 1600;
+const MAX_SELECTION_PANEL_HEIGHT = 1200;
+const DEFAULT_SELECTION_PANEL_WIDTH = 360;
+const DEFAULT_SELECTION_PANEL_HEIGHT = 220;
+const CONTENT_SCRIPT_VERSION = '1.6.15';
 const TRANSLATION_ENGINE_KEY = 'translatorDefaultEngine';
 const TRANSLATION_SITE_ENGINES_KEY = 'translatorSiteDefaultEngines';
 const TRANSLATION_ENGINE_LOCAL = 'local';
 const LLM_PROFILE_KEY = 'translatorLlmProfile';
 const PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
+const PROVIDER_CREDENTIALS_KEY = 'translatorProviderCredentials';
+const PROVIDER_ACTIVE_PROFILE_KEY = 'translatorProviderActiveProfileIds';
 const ONLINE_PROVIDER_KEY = 'translatorOnlineProvider';
 const LLM_PROVIDER_KEY = 'translatorLlmProvider';
 
@@ -98,6 +123,10 @@ const PROVIDER_DEFINITIONS = [
   { id: 'custom', stage: 'llm', label: '自定义 OpenAI 兼容接口', baseUrl: 'http://localhost:11434/v1/chat/completions', needsKey: false, model: 'llama3.2', allowHttp: true }
 ];
 let providerProfiles = {};
+let providerProfileConfigs = {};
+let providerCredentials = {};
+let providerActiveProfileIds = {};
+let editingProviderProfileIds = {};
 let activeOnlineProvider = 'google';
 let activeLlmProvider = 'openai';
 let pendingGlobalEngineSelection = null;
@@ -133,6 +162,11 @@ const deleteDateHistoryBtn = document.getElementById('deleteDateHistoryBtn');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 const historyStatus = document.getElementById('historyStatus');
 const historyList = document.getElementById('historyList');
+const historySearchInput = document.getElementById('historySearchInput');
+const historyEngineFilter = document.getElementById('historyEngineFilter');
+const historySiteFilter = document.getElementById('historySiteFilter');
+const historyDedupeToggle = document.getElementById('historyDedupeToggle');
+const historyUndoBtn = document.getElementById('historyUndoBtn');
 const HISTORY_KEY = 'translatorHistory';
 const READING_KEY = 'translatorReadingArea';
 const VARIANTS_KEY = 'translatorTranslationVariants';
@@ -146,6 +180,10 @@ let historyRenderLimit = 40;
 const HISTORY_RENDER_BATCH = 40;
 let clearConfirmView = null;
 let clearConfirmTimer = null;
+let dateDeleteSignature = null;
+let dateDeleteConfirmTimer = null;
+let archiveUndo = null;
+let archiveUndoTimer = null;
 
 function normalizeStoredItems(value) {
   if (!Array.isArray(value)) return [];
@@ -289,14 +327,12 @@ function openInlineReader(item, returnView = historyViewSelect?.value || 'readin
 }
 
 function openReader(item, returnView = historyViewSelect?.value || 'reading') {
-  if (!item?.id || !chrome?.tabs?.create) {
+  if (!item?.id || !chrome?.runtime?.sendMessage) {
     openInlineReader(item, returnView);
     return;
   }
-
-  const readerUrl = chrome.runtime.getURL(`reader.html?id=${encodeURIComponent(item.id)}`);
-  chrome.tabs.create({ url: readerUrl }, () => {
-    if (chrome.runtime.lastError) openInlineReader(item, returnView);
+  chrome.runtime.sendMessage({ type: 'OPEN_READER_TAB', recordId: item.id }, (response) => {
+    if (chrome.runtime.lastError || !response?.ok) openInlineReader(item, returnView);
   });
 }
 
@@ -353,15 +389,89 @@ function formatHistoryTime(timestamp) {
   }
 }
 
+function getHistoryDedupeKey(item) {
+  return [item?.sourceText, item?.sourceLang, item?.targetLang, item?.engineId || item?.engineStage, item?.pageUrl]
+    .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
+    .join('␟');
+}
+
 function getFilteredHistoryItems() {
   const sourceItems = getActiveArchiveItems();
   const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
   const to = historyToDate?.value ? new Date(`${historyToDate.value}T23:59:59.999`).getTime() : null;
+  const query = [historySearchInput?.value, historySiteFilter?.value].filter(Boolean).join(' ').trim().toLocaleLowerCase();
+  const engine = historyEngineFilter?.value || '';
+  const seen = new Set();
   return sourceItems.filter((item) => {
     if (from !== null && item.createdAt < from) return false;
     if (to !== null && item.createdAt > to) return false;
+    if (engine && (item.engineId || item.engineStage || 'local') !== engine) return false;
+    if (query) {
+      const haystack = [item.sourceText, item.translatedText, item.pageTitle, item.pageUrl, item.engineId, item.engineStage, item.providerId]
+        .map((value) => String(value || '').toLocaleLowerCase()).join('\n');
+      if (!haystack.includes(query)) return false;
+    }
+    if (historyDedupeToggle?.checked) {
+      const key = getHistoryDedupeKey(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
     return true;
   });
+}
+
+
+function resetDateDeleteConfirmation() {
+  if (dateDeleteConfirmTimer) clearTimeout(dateDeleteConfirmTimer);
+  dateDeleteConfirmTimer = null;
+  dateDeleteSignature = null;
+  if (deleteDateHistoryBtn) deleteDateHistoryBtn.textContent = '删日期范围';
+}
+
+function updateArchiveUndoButton() {
+  if (!historyUndoBtn) return;
+  historyUndoBtn.classList.toggle('hidden', !archiveUndo);
+  historyUndoBtn.textContent = archiveUndo ? '撤销（8秒）' : '撤销';
+}
+
+function clearArchiveUndo({ prune = true } = {}) {
+  if (archiveUndoTimer) clearTimeout(archiveUndoTimer);
+  archiveUndoTimer = null;
+  archiveUndo = null;
+  updateArchiveUndoButton();
+  if (prune) pruneTranslationVariants().catch(() => {});
+}
+
+function armArchiveUndo(description) {
+  if (archiveUndoTimer) clearTimeout(archiveUndoTimer);
+  archiveUndo = {
+    historyItems: historyItems.map((item) => ({ ...item })),
+    readingItems: readingItems.map((item) => ({ ...item })),
+    description
+  };
+  updateArchiveUndoButton();
+  archiveUndoTimer = setTimeout(() => clearArchiveUndo({ prune: true }), 8000);
+}
+
+async function persistArchiveState(options = {}) {
+  historyItems = normalizeStoredItems(historyItems);
+  readingItems = normalizeStoredItems(readingItems);
+  await chrome.storage.local.set({ [HISTORY_KEY]: historyItems, [READING_KEY]: readingItems });
+  if (historyLoaded) renderHistoryList(options);
+}
+
+async function restoreArchiveUndo() {
+  if (!archiveUndo) return;
+  const snapshot = archiveUndo;
+  clearArchiveUndo({ prune: false });
+  historyItems = snapshot.historyItems.map((item) => ({ ...item }));
+  readingItems = snapshot.readingItems.map((item) => ({ ...item }));
+  try {
+    await persistArchiveState();
+    setHistoryStatus('已撤销：' + snapshot.description, 'ok');
+  } catch (error) {
+    setHistoryStatus('撤销失败：' + String(error?.message || error || ''), 'err');
+  }
 }
 
 function getActiveArchiveView() {
@@ -387,6 +497,14 @@ function createHistoryButton(label, action, id) {
   return button;
 }
 
+function syncHistorySelectionControls() {
+  if (!historySelectAllBtn) return;
+  const selections = Array.from(historyList?.querySelectorAll('.history-select') || []);
+  const allSelected = selections.length > 0 && selections.every((input) => input.checked);
+  historySelectAllBtn.disabled = selections.length === 0;
+  historySelectAllBtn.textContent = allSelected ? '取消全选' : '全选';
+}
+
 function renderHistoryList(options = {}) {
   if (!historyList) return;
   if (!options.preserveLimit) historyRenderLimit = HISTORY_RENDER_BATCH;
@@ -399,6 +517,7 @@ function renderHistoryList(options = {}) {
     empty.style.cssText = 'padding:14px;text-align:center;color:var(--muted);';
     historyList.appendChild(empty);
     setHistoryStatus(`共 ${getActiveArchiveItems().length} 条${getActiveArchiveLabel()}记录`);
+    syncHistorySelectionControls();
     return;
   }
 
@@ -463,6 +582,7 @@ function renderHistoryList(options = {}) {
     historyList.appendChild(more);
   }
   setHistoryStatus(`显示 ${itemsToRender.length}/${visibleItems.length} 条，共 ${getActiveArchiveItems().length} 条${getActiveArchiveLabel()}记录`);
+  syncHistorySelectionControls();
 }
 
 function isInReadingArea(id) {
@@ -552,6 +672,7 @@ async function recordManualTranslationHistory(sourceText, translatedText, source
       engineId: metadata.engineId || 'local',
       engineStage: metadata.engineStage || 'local',
       providerId: metadata.providerId || 'browser-translator',
+      providerProfileKey: metadata.providerProfileKey || '',
       inReadingArea: settings[AUTO_READING_KEY] === true
     };
     stored.unshift(item);
@@ -586,17 +707,19 @@ historyList?.addEventListener('click', async (event) => {
   const readingIndex = readingItems.findIndex((item) => item.id === id);
   if (index < 0 && readingIndex < 0) return;
   if (button.dataset.action === 'delete') {
-    if (getActiveArchiveView() === 'reading') {
-      if (readingIndex < 0) return;
-      readingItems.splice(readingIndex, 1);
-      await saveReadingItems();
-      setHistoryStatus('已删除 1 条阅读区记录', 'ok');
-      return;
+    const view = getActiveArchiveView();
+    if (view === 'reading' && readingIndex < 0) return;
+    if (view !== 'reading' && index < 0) return;
+    armArchiveUndo('删除记录');
+    if (view === 'reading') readingItems.splice(readingIndex, 1);
+    else historyItems.splice(index, 1);
+    try {
+      await persistArchiveState();
+      setHistoryStatus(`已删除 1 条${view === 'reading' ? '阅读区' : '历史翻译'}记录，可在 8 秒内撤销`, 'ok');
+    } catch (error) {
+      await restoreArchiveUndo();
+      setHistoryStatus('删除失败：' + String(error?.message || error || ''), 'err');
     }
-    if (index < 0) return;
-    historyItems.splice(index, 1);
-    await saveHistoryItems();
-    setHistoryStatus('已删除 1 条历史翻译', 'ok');
   } else if (button.dataset.action === 'reading') {
     const item = historyItems[index] || readingItems.find((entry) => entry.id === id);
     if (!item) return;
@@ -626,10 +749,20 @@ readerModeTabs.forEach((tab) => {
 readerBackBtn?.addEventListener('click', closeReaderAndReturn);
 readerFontDecreaseBtn?.addEventListener('click', () => adjustReaderFont(-1));
 readerFontIncreaseBtn?.addEventListener('click', () => adjustReaderFont(1));
-historyFromDate?.addEventListener('change', renderHistoryList);
-historyToDate?.addEventListener('change', renderHistoryList);
+historyFromDate?.addEventListener('change', () => { resetDateDeleteConfirmation(); renderHistoryList(); });
+historyToDate?.addEventListener('change', () => { resetDateDeleteConfirmation(); renderHistoryList(); });
+historySearchInput?.addEventListener('input', renderHistoryList);
+historyEngineFilter?.addEventListener('change', renderHistoryList);
+historySiteFilter?.addEventListener('input', renderHistoryList);
+historyDedupeToggle?.addEventListener('change', renderHistoryList);
+historyList?.addEventListener('change', (event) => {
+  if (event.target?.matches?.('.history-select')) syncHistorySelectionControls();
+});
 historySelectAllBtn?.addEventListener('click', () => {
-  historyList?.querySelectorAll('.history-select').forEach((input) => { input.checked = true; });
+  const selections = Array.from(historyList?.querySelectorAll('.history-select') || []);
+  const shouldSelect = selections.some((input) => !input.checked);
+  selections.forEach((input) => { input.checked = shouldSelect; });
+  syncHistorySelectionControls();
 });
 deleteSelectedHistoryBtn?.addEventListener('click', async () => {
   const selected = getSelectedHistoryIds();
@@ -637,14 +770,18 @@ deleteSelectedHistoryBtn?.addEventListener('click', async () => {
     setHistoryStatus('请先选择要删除的记录', 'err');
     return;
   }
+  armArchiveUndo('批量删除记录');
   if (getActiveArchiveView() === 'reading') {
     readingItems = readingItems.filter((item) => !selected.has(item.id));
-    await saveReadingItems();
-    setHistoryStatus(`已删除 ${selected.size} 条阅读区记录`, 'ok');
   } else {
     historyItems = historyItems.filter((item) => !selected.has(item.id));
-    await saveHistoryItems();
-    setHistoryStatus(`已删除 ${selected.size} 条历史翻译`, 'ok');
+  }
+  try {
+    await persistArchiveState();
+    setHistoryStatus(`已删除 ${selected.size} 条${getActiveArchiveLabel()}记录，可在 8 秒内撤销`, 'ok');
+  } catch (error) {
+    await restoreArchiveUndo();
+    setHistoryStatus('删除失败：' + String(error?.message || error || ''), 'err');
   }
 });
 deleteDateHistoryBtn?.addEventListener('click', async () => {
@@ -660,36 +797,45 @@ deleteDateHistoryBtn?.addEventListener('click', async () => {
   }
   const view = getActiveArchiveView();
   const sourceItems = getActiveArchiveItems();
-  const nextItems = sourceItems.filter((item) => {
-    if (from !== null && item.createdAt < from) return true;
-    if (to !== null && item.createdAt > to) return true;
-    return false;
-  });
+  const nextItems = sourceItems.filter((item) => !((from === null || item.createdAt >= from) && (to === null || item.createdAt <= to)));
   const removed = sourceItems.length - nextItems.length;
-  if (removed && window.confirm(`确定删除日期范围内的 ${removed} 条记录吗？`)) {
-    if (view === 'reading') {
-      readingItems = nextItems;
-      await saveReadingItems();
-    } else {
-      historyItems = nextItems;
-      await saveHistoryItems();
-    }
-    setHistoryStatus(`已删除 ${removed} 条${getActiveArchiveLabel()}记录`, 'ok');
-  } else if (removed) {
-    setHistoryStatus('已取消删除');
-  } else {
+  if (!removed) {
+    resetDateDeleteConfirmation();
     setHistoryStatus('该日期范围没有记录');
+    return;
+  }
+  const signature = [view, from || '', to || '', removed].join('|');
+  if (dateDeleteSignature !== signature) {
+    resetDateDeleteConfirmation();
+    dateDeleteSignature = signature;
+    if (deleteDateHistoryBtn) deleteDateHistoryBtn.textContent = '再次点击确认';
+    setHistoryStatus(`再次点击删除日期范围内的 ${removed} 条记录`, 'err');
+    dateDeleteConfirmTimer = setTimeout(() => {
+      resetDateDeleteConfirmation();
+      setHistoryStatus('');
+    }, 3500);
+    return;
+  }
+  resetDateDeleteConfirmation();
+  armArchiveUndo('按日期删除记录');
+  if (view === 'reading') readingItems = nextItems;
+  else historyItems = nextItems;
+  try {
+    await persistArchiveState();
+    setHistoryStatus(`已删除 ${removed} 条${getActiveArchiveLabel()}记录，可在 8 秒内撤销`, 'ok');
+  } catch (error) {
+    await restoreArchiveUndo();
+    setHistoryStatus('删除失败：' + String(error?.message || error || ''), 'err');
   }
 });
+historyUndoBtn?.addEventListener('click', restoreArchiveUndo);
 clearHistoryBtn?.addEventListener('click', async () => {
   const view = getActiveArchiveView();
   const currentItems = getActiveArchiveItems();
   if (!currentItems.length) {
     resetClearConfirmation();
-    setConsoleTab('translation', false);
-    closeReader();
-    setHistoryToolsOpen(false);
     renderHistoryList();
+    setHistoryStatus(`没有可清空的${getActiveArchiveLabel()}记录`);
     return;
   }
   if (clearConfirmView !== view) {
@@ -697,8 +843,8 @@ clearHistoryBtn?.addEventListener('click', async () => {
     return;
   }
   resetClearConfirmation();
+  armArchiveUndo(`清空${getActiveArchiveLabel()}记录`);
 
-  const previousItems = [...currentItems];
   try {
     const clearPatch = view === 'reading'
       ? { [READING_KEY]: [] }
@@ -706,16 +852,10 @@ clearHistoryBtn?.addEventListener('click', async () => {
     await chrome.storage.local.set(clearPatch);
     if (view === 'reading') readingItems = [];
     else historyItems = [];
-    setConsoleTab('translation', false);
-    closeReader();
-    setHistoryToolsOpen(false);
     renderHistoryList();
-    setHistoryStatus(`${getActiveArchiveLabel()}已清空`, 'ok');
+    setHistoryStatus(`${getActiveArchiveLabel()}已清空，可在 8 秒内撤销`, 'ok');
   } catch (error) {
-    resetClearConfirmation();
-    if (view === 'reading') readingItems = previousItems;
-    else historyItems = previousItems;
-    renderHistoryList();
+    await restoreArchiveUndo();
     setHistoryStatus(`清空${getActiveArchiveLabel()}失败：` + String(error?.message || error || ''), 'err');
   }
 });
@@ -859,6 +999,62 @@ function setStatus(msg, cls = "") {
   statusEl.className = `hint small ${cls}`.trim();
 }
 
+function builtInSelectionPanelDefaultSize() {
+  return { width: DEFAULT_SELECTION_PANEL_WIDTH, height: DEFAULT_SELECTION_PANEL_HEIGHT };
+}
+
+function normalizeSelectionPanelDefaultSize(value) {
+  const width = Math.round(Number(value?.width));
+  const height = Math.round(Number(value?.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width < MIN_SELECTION_PANEL_WIDTH || width > MAX_SELECTION_PANEL_WIDTH) return null;
+  if (height < MIN_SELECTION_PANEL_HEIGHT || height > MAX_SELECTION_PANEL_HEIGHT) return null;
+  return { width, height };
+}
+
+function renderSelectionPanelDefaultSize(size) {
+  const normalized = normalizeSelectionPanelDefaultSize(size) || builtInSelectionPanelDefaultSize();
+  if (selectionPanelDefaultWidthInput) selectionPanelDefaultWidthInput.value = String(normalized.width);
+  if (selectionPanelDefaultHeightInput) selectionPanelDefaultHeightInput.value = String(normalized.height);
+  selectionPanelSizePresetButtons.forEach((button) => {
+    const active = Number(button.dataset.panelWidth) === normalized.width && Number(button.dataset.panelHeight) === normalized.height;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+async function loadSelectionPanelDefaultSize() {
+  const stored = await chrome.storage.local.get([SELECTION_PANEL_DEFAULT_SIZE_KEY, SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY, SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY]);
+  renderSelectionPanelDefaultSize(stored[SELECTION_PANEL_DEFAULT_SIZE_KEY]);
+  if (selectionPanelUseGlobalSizeToggle) selectionPanelUseGlobalSizeToggle.checked = stored[SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY] === true;
+  if (selectionPanelRememberSiteSizeToggle) selectionPanelRememberSiteSizeToggle.checked = stored[SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY] !== false;
+}
+
+async function saveSelectionPanelDefaultSize(sizeOverride = null) {
+  const size = normalizeSelectionPanelDefaultSize(sizeOverride || {
+    width: selectionPanelDefaultWidthInput?.value,
+    height: selectionPanelDefaultHeightInput?.value
+  });
+  if (!size) {
+    setStatus('面板大小无效：宽度 240-1600 px，高度 180-1200 px', 'err');
+    return;
+  }
+  await chrome.storage.local.set({ [SELECTION_PANEL_DEFAULT_SIZE_KEY]: size });
+  const stored = await chrome.storage.local.get([SELECTION_PANEL_DEFAULT_SIZE_KEY]);
+  const verified = normalizeSelectionPanelDefaultSize(stored[SELECTION_PANEL_DEFAULT_SIZE_KEY]);
+  if (!verified || verified.width !== size.width || verified.height !== size.height) {
+    throw new Error('默认面板大小保存后校验失败');
+  }
+  renderSelectionPanelDefaultSize(verified);
+  setStatus('默认面板大小已保存', 'ok');
+}
+
+async function resetSelectionPanelDefaultSize() {
+  await chrome.storage.local.remove([SELECTION_PANEL_DEFAULT_SIZE_KEY]);
+  renderSelectionPanelDefaultSize(builtInSelectionPanelDefaultSize());
+  setStatus('已恢复默认面板大小', 'ok');
+}
+
 function getSiteKeyFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -914,6 +1110,68 @@ function providerProfileDefaults(definition) {
     systemPrompt: 'You are a professional translation engine. Translate only. Preserve paragraph breaks, line breaks, numbering, citation markers, URLs, and code. Do not add explanations or omit content.',
     userPrompt: 'Translate the following text into {{to}}. Return only the translation.\n\n{{origin}}'
   };
+}
+
+const PROVIDER_SECRET_FIELDS = ['apiKey', 'appId', 'appSecret'];
+const DEFAULT_PROVIDER_PROFILE_ID = 'default';
+
+function makeProviderProfileStorageKey(providerId, profileId) {
+  return `${providerId}::${profileId}`;
+}
+
+function makeProviderProfileId() {
+  return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function splitProviderProfile(profile = {}) {
+  const config = { ...profile };
+  const credentials = {};
+  for (const field of PROVIDER_SECRET_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(config, field)) {
+      credentials[field] = String(config[field] ?? '');
+      delete config[field];
+    }
+  }
+  return { config, credentials };
+}
+
+function mergeProviderProfile(config = {}, credentials = {}) {
+  return { ...config, ...credentials };
+}
+
+function normalizeProfileName(value, fallback = '默认配置') {
+  return String(value || '').trim().slice(0, 48) || fallback;
+}
+
+function getProviderProfileEntries(providerId) {
+  return Object.entries(providerProfileConfigs)
+    .filter(([, profile]) => profile?.providerId === providerId)
+    .map(([storageKey, profile]) => ({ storageKey, ...profile }))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
+
+function getActiveProviderProfileStorageKey(providerId) {
+  const requested = providerActiveProfileIds[providerId];
+  if (requested && providerProfileConfigs[requested]?.providerId === providerId) return requested;
+  return getProviderProfileEntries(providerId)[0]?.storageKey || '';
+}
+
+function getEditingProviderProfileStorageKey(providerId) {
+  const requested = editingProviderProfileIds[providerId];
+  if (requested && providerProfileConfigs[requested]?.providerId === providerId) return requested;
+  return getActiveProviderProfileStorageKey(providerId);
+}
+
+function getMergedProviderProfileByStorageKey(storageKey) {
+  return mergeProviderProfile(providerProfileConfigs[storageKey] || {}, providerCredentials[storageKey] || {});
+}
+
+function refreshActiveProviderProfiles() {
+  providerProfiles = {};
+  for (const definition of PROVIDER_DEFINITIONS) {
+    const storageKey = getActiveProviderProfileStorageKey(definition.id);
+    if (storageKey) providerProfiles[definition.id] = getMergedProviderProfileByStorageKey(storageKey);
+  }
 }
 
 function currentProviderId() {
@@ -984,9 +1242,68 @@ function renderProviderFieldVisibility(definition) {
   }
 }
 
+function renderProviderProfileList() {
+  if (!providerProfileList) return;
+  const providerId = currentProviderId();
+  const entries = getProviderProfileEntries(providerId);
+  const activeStorageKey = getActiveProviderProfileStorageKey(providerId);
+  const editingStorageKey = getEditingProviderProfileStorageKey(providerId);
+  providerProfileList.textContent = '';
+  if (!entries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'provider-profile-empty';
+    empty.textContent = '尚未创建配置档案';
+    providerProfileList.appendChild(empty);
+    return;
+  }
+  entries.forEach((entry) => {
+    const row = document.createElement('div');
+    const isActive = entry.storageKey === activeStorageKey;
+    row.className = 'provider-profile-row' + (entry.storageKey === editingStorageKey ? ' is-editing' : '') + (isActive ? ' is-active' : '');
+
+    const useLabel = document.createElement('label');
+    useLabel.className = 'provider-profile-use';
+    useLabel.title = isActive ? '当前翻译将使用此配置' : '设为当前翻译配置';
+    const use = document.createElement('input');
+    use.type = 'radio';
+    use.name = `active-provider-profile-${providerId}`;
+    use.checked = isActive;
+    use.setAttribute('aria-label', `使用配置：${entry.name || '未命名配置'}`);
+    use.addEventListener('change', () => {
+      if (use.checked) void activateProviderProfile(entry.storageKey);
+    });
+    useLabel.appendChild(use);
+
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.className = 'provider-profile-select';
+    const name = document.createElement('span');
+    name.className = 'provider-profile-name';
+    name.textContent = entry.name || '未命名配置';
+    const meta = document.createElement('span');
+    meta.className = 'provider-profile-meta';
+    const ready = providerProfileIsReady(providerId, getMergedProviderProfileByStorageKey(entry.storageKey));
+    meta.textContent = isActive
+      ? (ready ? '当前使用 · 已配置' : '当前使用 · 待配置')
+      : (ready ? '已配置' : '待配置');
+    select.title = `${entry.name || '未命名配置'}：${meta.textContent}`;
+    select.append(name, meta);
+    select.addEventListener('click', () => {
+      editingProviderProfileIds[providerId] = entry.storageKey;
+      renderProviderProfileList();
+      applyProviderProfileToInputs();
+    });
+    row.append(useLabel, select);
+    providerProfileList.appendChild(row);
+  });
+}
+
 function applyProviderProfileToInputs() {
-  const definition = getProviderDefinition(currentProviderId());
-  const profile = { ...providerProfileDefaults(definition), ...(providerProfiles[currentProviderId()] || {}) };
+  const providerId = currentProviderId();
+  const definition = getProviderDefinition(providerId);
+  const storageKey = getEditingProviderProfileStorageKey(providerId);
+  const profile = { ...providerProfileDefaults(definition), ...(storageKey ? getMergedProviderProfileByStorageKey(storageKey) : {}) };
+  if (providerProfileNameInput) providerProfileNameInput.value = profile.name || '默认配置';
   if (providerBaseUrlInput) providerBaseUrlInput.value = profile.baseUrl;
   if (providerApiKeyInput) providerApiKeyInput.value = profile.apiKey;
   if (providerModelInput) providerModelInput.value = profile.model;
@@ -1001,7 +1318,9 @@ function applyProviderProfileToInputs() {
       ? uiMessage('newApiKeyPlaceholder', '粘贴 New API 控制台中的 API Key')
       : definition?.needsKey ? uiMessage('providerKeyPlaceholder', '粘贴该服务的 API Key / Token') : uiMessage('providerKeyOptional', '此服务可不填 Key');
   }
-  setProviderProfileStatus(providerProfileIsReady(currentProviderId(), profile) ? '可用' : '待配置', providerProfileIsReady(currentProviderId(), profile) ? 'ok' : 'neutral');
+  renderProviderProfileList();
+  const ready = providerProfileIsReady(providerId, profile);
+  setProviderProfileStatus(storageKey ? (ready ? '当前档案可用' : '当前档案待配置') : '新建档案后保存', ready ? 'ok' : 'neutral');
 }
 
 function readProviderProfileFromInputs() {
@@ -1018,10 +1337,77 @@ function readProviderProfileFromInputs() {
 }
 
 async function loadProviderProfiles() {
-  const settings = await chrome.storage.local.get([PROVIDER_PROFILES_KEY, LLM_PROFILE_KEY, ONLINE_PROVIDER_KEY, LLM_PROVIDER_KEY, TRANSLATION_ENGINE_KEY]);
-  providerProfiles = settings[PROVIDER_PROFILES_KEY] && typeof settings[PROVIDER_PROFILES_KEY] === 'object'
+  const settings = await chrome.storage.local.get([
+    PROVIDER_PROFILES_KEY,
+    PROVIDER_CREDENTIALS_KEY,
+    PROVIDER_ACTIVE_PROFILE_KEY,
+    LLM_PROFILE_KEY,
+    ONLINE_PROVIDER_KEY,
+    LLM_PROVIDER_KEY,
+    TRANSLATION_ENGINE_KEY
+  ]);
+  const storedConfigs = settings[PROVIDER_PROFILES_KEY] && typeof settings[PROVIDER_PROFILES_KEY] === 'object'
     ? { ...settings[PROVIDER_PROFILES_KEY] } : {};
-  if (!providerProfiles.openai && settings[LLM_PROFILE_KEY]) providerProfiles.openai = { ...settings[LLM_PROFILE_KEY] };
+  const storedCredentials = settings[PROVIDER_CREDENTIALS_KEY] && typeof settings[PROVIDER_CREDENTIALS_KEY] === 'object'
+    ? { ...settings[PROVIDER_CREDENTIALS_KEY] } : {};
+  const storedActive = settings[PROVIDER_ACTIVE_PROFILE_KEY] && typeof settings[PROVIDER_ACTIVE_PROFILE_KEY] === 'object'
+    ? { ...settings[PROVIDER_ACTIVE_PROFILE_KEY] } : {};
+  const legacyOpenAi = settings[LLM_PROFILE_KEY] && typeof settings[LLM_PROFILE_KEY] === 'object'
+    ? settings[LLM_PROFILE_KEY]
+    : null;
+
+  let migrated = Boolean(legacyOpenAi);
+  providerProfileConfigs = {};
+  providerCredentials = {};
+  const legacyEntries = { ...storedConfigs };
+  if (legacyOpenAi && !Object.values(legacyEntries).some((profile) => profile?.providerId === 'openai')) {
+    legacyEntries.openai = { ...legacyOpenAi, ...(legacyEntries.openai || {}) };
+  }
+
+  for (const [storedKey, rawProfile] of Object.entries(legacyEntries)) {
+    if (!rawProfile || typeof rawProfile !== 'object') continue;
+    const isNewRecord = Boolean(rawProfile.providerId && rawProfile.profileId);
+    const providerId = isNewRecord ? rawProfile.providerId : storedKey;
+    const profileId = isNewRecord ? rawProfile.profileId : DEFAULT_PROVIDER_PROFILE_ID;
+    const storageKey = isNewRecord ? storedKey : makeProviderProfileStorageKey(providerId, profileId);
+    const { config, credentials } = splitProviderProfile(rawProfile);
+    const profileConfig = {
+      ...config,
+      providerId,
+      profileId,
+      name: normalizeProfileName(config.name, profileId === DEFAULT_PROVIDER_PROFILE_ID ? '默认配置' : '未命名配置'),
+      createdAt: Number(config.createdAt) || Date.now(),
+      updatedAt: Number(config.updatedAt) || Date.now()
+    };
+    providerProfileConfigs[storageKey] = profileConfig;
+    const storedCredential = storedCredentials[storageKey] || storedCredentials[providerId] || {};
+    providerCredentials[storageKey] = { ...credentials, ...storedCredential };
+    if (!isNewRecord || storedCredentials[providerId]) migrated = true;
+  }
+
+  providerActiveProfileIds = {};
+  for (const definition of PROVIDER_DEFINITIONS) {
+    const entries = getProviderProfileEntries(definition.id);
+    if (!entries.length) continue;
+    const requested = storedActive[definition.id];
+    const activeStorageKey = requested && providerProfileConfigs[requested]?.providerId === definition.id
+      ? requested
+      : entries[0].storageKey;
+    providerActiveProfileIds[definition.id] = activeStorageKey;
+    if (requested !== activeStorageKey) migrated = true;
+    editingProviderProfileIds[definition.id] = activeStorageKey;
+  }
+  refreshActiveProviderProfiles();
+
+  if (migrated) {
+    await chrome.storage.local.set({
+      [PROVIDER_PROFILES_KEY]: providerProfileConfigs,
+      [PROVIDER_CREDENTIALS_KEY]: providerCredentials,
+      [PROVIDER_ACTIVE_PROFILE_KEY]: providerActiveProfileIds
+    });
+    if (legacyOpenAi) await chrome.storage.local.remove([LLM_PROFILE_KEY]);
+  }
+
   activeOnlineProvider = settings[ONLINE_PROVIDER_KEY] || 'google';
   activeLlmProvider = settings[LLM_PROVIDER_KEY] || 'openai';
   const stageKey = providerStageSelect?.value === 'online' ? ONLINE_PROVIDER_KEY : LLM_PROVIDER_KEY;
@@ -1111,6 +1497,124 @@ async function saveGlobalTranslationEngine(engineId) {
   try { await chrome.storage.sync.remove([TRANSLATION_ENGINE_KEY]); } catch {}
 }
 
+async function persistProviderProfile(providerId, profile, options = {}) {
+  const profileId = options.profileId || providerProfileConfigs[getEditingProviderProfileStorageKey(providerId)]?.profileId || makeProviderProfileId();
+  const storageKey = makeProviderProfileStorageKey(providerId, profileId);
+  const existing = providerProfileConfigs[storageKey] || {};
+  const name = normalizeProfileName(options.name ?? providerProfileNameInput?.value, existing.name || '新配置');
+  if (!options.allowIncomplete && !providerProfileIsReady(providerId, profile)) {
+    throw new Error('请补齐该服务所需的地址、密钥、模型或账号字段');
+  }
+  const { config, credentials } = splitProviderProfile(profile);
+  providerProfileConfigs = {
+    ...providerProfileConfigs,
+    [storageKey]: {
+      ...config,
+      providerId,
+      profileId,
+      name,
+      createdAt: existing.createdAt || Date.now(),
+      updatedAt: Date.now()
+    }
+  };
+  providerCredentials = { ...providerCredentials, [storageKey]: credentials };
+  editingProviderProfileIds[providerId] = storageKey;
+  const shouldActivate = options.activate === true || !getActiveProviderProfileStorageKey(providerId);
+  if (shouldActivate) providerActiveProfileIds = { ...providerActiveProfileIds, [providerId]: storageKey };
+  refreshActiveProviderProfiles();
+  const stageKey = options.stageKey || currentProviderStorageKey();
+  const patch = {
+    [PROVIDER_PROFILES_KEY]: providerProfileConfigs,
+    [PROVIDER_CREDENTIALS_KEY]: providerCredentials,
+    [PROVIDER_ACTIVE_PROFILE_KEY]: providerActiveProfileIds
+  };
+  if (options.updateStage !== false) patch[stageKey] = providerId;
+  await chrome.storage.local.set(patch);
+  if (providerId === 'openai') await chrome.storage.local.remove([LLM_PROFILE_KEY]);
+  if (options.updateStage !== false) {
+    activeOnlineProvider = stageKey === ONLINE_PROVIDER_KEY ? providerId : activeOnlineProvider;
+    activeLlmProvider = stageKey === LLM_PROVIDER_KEY ? providerId : activeLlmProvider;
+  }
+  return storageKey;
+}
+
+async function activateProviderProfile(storageKey) {
+  const profile = providerProfileConfigs[storageKey];
+  if (!profile) return;
+  const merged = getMergedProviderProfileByStorageKey(storageKey);
+  if (!providerProfileIsReady(profile.providerId, merged)) {
+    editingProviderProfileIds[profile.providerId] = storageKey;
+    applyProviderProfileToInputs();
+    setProviderProfileStatus('请先补齐此档案再设为当前使用', 'error');
+    return;
+  }
+  providerActiveProfileIds = { ...providerActiveProfileIds, [profile.providerId]: storageKey };
+  editingProviderProfileIds[profile.providerId] = storageKey;
+  refreshActiveProviderProfiles();
+  const stageKey = getProviderDefinition(profile.providerId)?.stage === 'online' ? ONLINE_PROVIDER_KEY : LLM_PROVIDER_KEY;
+  await chrome.storage.local.set({
+    [PROVIDER_ACTIVE_PROFILE_KEY]: providerActiveProfileIds,
+    [stageKey]: profile.providerId
+  });
+  if (stageKey === ONLINE_PROVIDER_KEY) activeOnlineProvider = profile.providerId;
+  else activeLlmProvider = profile.providerId;
+  renderProviderProfileList();
+  applyProviderProfileToInputs();
+  setProviderProfileStatus('已设为当前使用', 'ok');
+}
+
+async function createProviderProfile(copyCurrent = false) {
+  const providerId = currentProviderId();
+  const definition = getProviderDefinition(providerId);
+  const currentStorageKey = getEditingProviderProfileStorageKey(providerId);
+  const current = copyCurrent && currentStorageKey
+    ? getMergedProviderProfileByStorageKey(currentStorageKey)
+    : providerProfileDefaults(definition);
+  const name = copyCurrent
+    ? `${normalizeProfileName(current.name, '配置')} 副本`
+    : '新配置';
+  const storageKey = await persistProviderProfile(providerId, { ...current, name }, {
+    profileId: makeProviderProfileId(),
+    name,
+    allowIncomplete: true,
+    activate: false
+  });
+  editingProviderProfileIds[providerId] = storageKey;
+  renderProviderProfileList();
+  applyProviderProfileToInputs();
+  setProviderProfileStatus(copyCurrent ? '已创建配置副本' : '已创建新配置', 'neutral');
+}
+
+async function deleteCurrentProviderProfile() {
+  const providerId = currentProviderId();
+  const storageKey = getEditingProviderProfileStorageKey(providerId);
+  const entries = getProviderProfileEntries(providerId);
+  if (!storageKey || entries.length <= 1) {
+    setProviderProfileStatus('每个服务至少保留一个配置档案', 'error');
+    return;
+  }
+  const name = providerProfileConfigs[storageKey]?.name || '当前配置';
+  if (!window.confirm(`确定删除“${name}”吗？此操作会同时删除其本机凭证。`)) return;
+  const nextConfigs = { ...providerProfileConfigs };
+  const nextCredentials = { ...providerCredentials };
+  delete nextConfigs[storageKey];
+  delete nextCredentials[storageKey];
+  const fallback = entries.find((entry) => entry.storageKey !== storageKey)?.storageKey || '';
+  providerProfileConfigs = nextConfigs;
+  providerCredentials = nextCredentials;
+  editingProviderProfileIds[providerId] = fallback;
+  if (providerActiveProfileIds[providerId] === storageKey) providerActiveProfileIds = { ...providerActiveProfileIds, [providerId]: fallback };
+  refreshActiveProviderProfiles();
+  await chrome.storage.local.set({
+    [PROVIDER_PROFILES_KEY]: providerProfileConfigs,
+    [PROVIDER_CREDENTIALS_KEY]: providerCredentials,
+    [PROVIDER_ACTIVE_PROFILE_KEY]: providerActiveProfileIds
+  });
+  renderProviderProfileList();
+  applyProviderProfileToInputs();
+  setProviderProfileStatus('已删除配置档案', 'ok');
+}
+
 async function saveLlmProfile() {
   const profile = {
     baseUrl: String(llmBaseUrlInput?.value || '').trim().replace(/\/+$/, ''),
@@ -1118,46 +1622,25 @@ async function saveLlmProfile() {
     apiKey: String(llmApiKeyInput?.value || '').trim()
   };
   if (!isLlmProfileReady(profile)) throw new Error('请填写有效的 HTTPS API 地址和模型名称');
-  await chrome.storage.local.set({ [LLM_PROFILE_KEY]: profile });
+  await persistProviderProfile('openai', profile, { profileId: DEFAULT_PROVIDER_PROFILE_ID, name: '默认配置', activate: true, stageKey: LLM_PROVIDER_KEY });
   if (llmProfileStatus) llmProfileStatus.textContent = uiMessage('configuredModel', `已配置：${profile.model}`, [profile.model]);
   await loadTranslationEngineSettings();
 }
 
 async function saveProviderProfile() {
   const providerId = currentProviderId();
-  const profile = readProviderProfileFromInputs();
-  if (!providerProfileIsReady(providerId, profile)) {
-    throw new Error('请补齐该服务所需的地址、密钥、模型或账号字段');
-  }
-  providerProfiles = { ...providerProfiles, [providerId]: profile };
-  const stageKey = currentProviderStorageKey();
-  const patch = { [PROVIDER_PROFILES_KEY]: providerProfiles, [stageKey]: providerId };
-  if (providerId === 'openai') patch[LLM_PROFILE_KEY] = { baseUrl: profile.baseUrl, model: profile.model, apiKey: profile.apiKey };
-  await chrome.storage.local.set(patch);
-  activeOnlineProvider = stageKey === ONLINE_PROVIDER_KEY ? providerId : activeOnlineProvider;
-  activeLlmProvider = stageKey === LLM_PROVIDER_KEY ? providerId : activeLlmProvider;
+  await persistProviderProfile(providerId, readProviderProfileFromInputs(), { name: providerProfileNameInput?.value });
   await loadTranslationEngineSettings();
-  setProviderProfileStatus('已保存', 'ok');
+  setProviderProfileStatus('已保存到本机凭证存储', 'ok');
 }
 
 async function testProviderProfile() {
   const providerId = currentProviderId();
-  const profile = readProviderProfileFromInputs();
-  if (!providerProfileIsReady(providerId, profile)) throw new Error('请先补齐服务配置');
-  const storedBefore = await chrome.storage.local.get([PROVIDER_PROFILES_KEY]);
-  const previousProfiles = storedBefore[PROVIDER_PROFILES_KEY] && typeof storedBefore[PROVIDER_PROFILES_KEY] === 'object'
-    ? { ...storedBefore[PROVIDER_PROFILES_KEY] }
-    : {};
-  providerProfiles = { ...providerProfiles, [providerId]: profile };
-  await chrome.storage.local.set({ [PROVIDER_PROFILES_KEY]: providerProfiles });
-  try {
-    const response = await chrome.runtime.sendMessage({ type: 'TEST_TRANSLATION_PROVIDER', providerId, targetLang: targetSelect?.value || 'zh-Hans' });
-    if (!response?.ok) throw new Error(response?.error || '测试请求失败');
-    setProviderProfileStatus('连接成功', 'ok');
-  } finally {
-    providerProfiles = previousProfiles;
-    await chrome.storage.local.set({ [PROVIDER_PROFILES_KEY]: previousProfiles });
-  }
+  const profileId = providerProfileConfigs[getEditingProviderProfileStorageKey(providerId)]?.profileId || '';
+  const storageKey = await persistProviderProfile(providerId, readProviderProfileFromInputs(), { profileId, name: providerProfileNameInput?.value });
+  const response = await chrome.runtime.sendMessage({ type: 'TEST_TRANSLATION_PROVIDER', providerId, profileKey: storageKey, targetLang: targetSelect?.value || 'zh-Hans' });
+  if (!response?.ok) throw new Error(response?.error || '测试请求失败');
+  setProviderProfileStatus('连接成功，配置已保存', 'ok');
 }
 
 async function setCurrentSiteTranslationEngine(engineId) {
@@ -1571,14 +2054,15 @@ async function doTranslate() {
 
     if (selectedEngine !== TRANSLATION_ENGINE_LOCAL) {
       setStatus(`正在使用${translationEngineLabel(selectedEngine)}...`, '');
-      const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text, sourceLang: sourceLanguage, targetLang: targetLanguage, providerId });
+      const providerProfileKey = getActiveProviderProfileStorageKey(providerId);
+      const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text, sourceLang: sourceLanguage, targetLang: targetLanguage, providerId, profileKey: providerProfileKey });
       if (!response?.ok) throw new Error(response?.error || 'PROVIDER_TRANSLATION_FAILED');
       const translation = String(response.translation || '');
       if (!translation.trim()) throw new Error('PROVIDER_EMPTY_RESPONSE');
       outputEl.textContent = translation;
       setCopyEnabled(true);
       setSpeakEnabled(true);
-      await recordManualTranslationHistory(text, translation, sourceLanguage, targetLanguage, { engineId: selectedEngine, engineStage: selectedEngine, providerId });
+      await recordManualTranslationHistory(text, translation, sourceLanguage, targetLanguage, { engineId: selectedEngine, engineStage: selectedEngine, providerId, providerProfileKey });
       setStatus(`完成：${translationEngineLabel(selectedEngine)}`, 'ok');
       return;
     }
@@ -1798,6 +2282,7 @@ swapBtn?.addEventListener("click", () => {
       ? uiMessage('sameLanguageContinue', '同语言时继续翻译')
       : uiMessage('sameLanguageKeepOriginal', '同语言时保留原文');
     if (s.autoTranslateTargetLang) targetSelect.value = s.autoTranslateTargetLang;
+    await loadSelectionPanelDefaultSize();
     
     // 加载白名单和默认引擎；历史记录切到历史页时再按需加载
     await loadWhitelist();
@@ -1848,31 +2333,46 @@ whitelistInput?.addEventListener('input', () => {
 // 自动翻译开关：持久化并提示
 autoToggle?.addEventListener('change', async (e) => {
   const enabled = !!e.target.checked;
-  await chrome.storage.sync.set({ autoTranslateEnabled: enabled, autoTranslateTargetLang: targetSelect.value });
-  updateToggleStatus(autoToggle, autoToggleStatus, enabled);
-  setStatus(enabled ? '已开启：自动翻译网页' : '已关闭：自动翻译网页', enabled ? 'ok' : '');
+  const previous = !enabled;
+  try {
+    await chrome.storage.sync.set({ autoTranslateEnabled: enabled, autoTranslateTargetLang: targetSelect.value });
+    updateToggleStatus(autoToggle, autoToggleStatus, enabled);
+    setStatus(enabled ? '已开启：自动翻译网页' : '已关闭：自动翻译网页', enabled ? 'ok' : '');
+  } catch (error) {
+    e.target.checked = previous;
+    updateToggleStatus(autoToggle, autoToggleStatus, previous);
+    setStatus('自动翻译设置失败：' + String(error?.message || error || ''), 'err');
+  }
 });
 
-// 选中翻译开关：持久化并通知content script
+async function ensureSelectionTranslationContentScript(tabId) {
+  let status = null;
+  try {
+    status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+  } catch {}
+  if (status?.version === CONTENT_SCRIPT_VERSION) return status;
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+  status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+  if (status?.version !== CONTENT_SCRIPT_VERSION) throw new Error('当前网页仍在运行旧版划词逻辑，请刷新页面后再开启。');
+  return status;
+}
 
 selectionToggle?.addEventListener('change', async (e) => {
   const enabled = !!e.target.checked;
-  await chrome.storage.sync.set({ selectionTranslateEnabled: enabled });
-  updateToggleStatus(selectionToggle, selectionToggleStatus, enabled);
-  setStatus(enabled ? '已开启：选中文本翻译' : '已关闭：选中文本翻译', enabled ? 'ok' : '');
-
-  // 通知当前标签页的content script更新选中翻译状态
+  const previous = !enabled;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, {
-        type: 'TOGGLE_SELECTION_TRANSLATION',
-        enabled: enabled
-      });
-    }
-  } catch (e) {
-    // 忽略错误（可能是页面不支持或其他原因）
-    console.warn('Failed to notify content script about selection translation toggle:', e);
+    if (!tab?.id) throw new Error('没有可操作的当前标签页');
+    await ensureSelectionTranslationContentScript(tab.id);
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_SELECTION_TRANSLATION', enabled });
+    if (!response?.ok) throw new Error(response?.error || '页面没有确认选中翻译状态');
+    await chrome.storage.sync.set({ selectionTranslateEnabled: enabled });
+    updateToggleStatus(selectionToggle, selectionToggleStatus, enabled);
+    setStatus(enabled ? '已开启：选中文本翻译' : '已关闭：选中文本翻译', enabled ? 'ok' : '');
+  } catch (error) {
+    e.target.checked = previous;
+    updateToggleStatus(selectionToggle, selectionToggleStatus, previous);
+    setStatus('当前页面无法切换选中翻译：' + String(error?.message || error || ''), 'err');
   }
 });
 
@@ -1929,6 +2429,62 @@ function bindSelectionDisplayToggle(toggle, status, key, label) {
 
 bindSelectionDisplayToggle(selectionBilingualToggle, selectionBilingualToggleStatus, SELECTION_SHOW_BILINGUAL_KEY, '面板显示双语');
 bindSelectionDisplayToggle(selectionSourceToggle, selectionSourceToggleStatus, SELECTION_SHOW_SOURCE_KEY, '显示翻译来源');
+selectionPanelDefaultSizeSaveBtn?.addEventListener('click', async () => {
+  try {
+    await saveSelectionPanelDefaultSize();
+  } catch (error) {
+    setStatus('默认面板大小保存失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+selectionPanelSizePresetButtons.forEach((button) => button.addEventListener('click', async () => {
+  try {
+    await saveSelectionPanelDefaultSize({ width: button.dataset.panelWidth, height: button.dataset.panelHeight });
+  } catch (error) {
+    setStatus('默认面板大小保存失败：' + String(error?.message || error || ''), 'err');
+  }
+}));
+selectionPanelRememberSiteSizeToggle?.addEventListener('change', async (event) => {
+  await chrome.storage.local.set({ [SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY]: !!event.target.checked });
+  setStatus(event.target.checked ? '已开启：记忆网站面板大小' : '已关闭：仅记忆网站面板位置', 'ok');
+});
+selectionPanelUseGlobalSizeToggle?.addEventListener('change', async (event) => {
+  try {
+    await chrome.storage.local.set({ [SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY]: !!event.target.checked });
+    setStatus(event.target.checked ? '已开启：所有网页使用全局面板大小' : '已关闭：沿用网站记忆的面板大小', 'ok');
+  } catch (error) {
+    event.target.checked = !event.target.checked;
+    setStatus('全局面板大小设置失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+openPanelSizeTunerBtn?.addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) throw new Error('没有可用网页');
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, { type: 'OPEN_SELECTION_PANEL_SIZE_TUNER' });
+    } catch {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['contentScript.js'] });
+      response = await chrome.tabs.sendMessage(tab.id, { type: 'OPEN_SELECTION_PANEL_SIZE_TUNER' });
+    }
+    if (!response?.ok) throw new Error(response?.error || '无法打开调试面板');
+    setStatus('已打开尺寸调试面板，拖动后在面板内保存', 'ok');
+  } catch (error) {
+    setStatus('请刷新当前网页后再打开尺寸调试面板', 'err');
+  }
+});
+selectionPanelDefaultSizeResetBtn?.addEventListener('click', async () => {
+  try {
+    await resetSelectionPanelDefaultSize();
+  } catch (error) {
+    setStatus('默认面板大小恢复失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+[selectionPanelDefaultWidthInput, selectionPanelDefaultHeightInput].forEach((input) => input?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  selectionPanelDefaultSizeSaveBtn?.click();
+}));
 sameLanguageModeSelect?.addEventListener('change', async (event) => {
   const previous = event.target.value === 'translate' ? 'skip' : 'translate';
   const mode = event.target.value === 'translate' ? 'translate' : 'skip';
@@ -1974,11 +2530,31 @@ saveLlmProfileBtn?.addEventListener('click', async () => {
 providerStageSelect?.addEventListener('change', async () => {
   const selectedId = providerStageSelect.value === 'online' ? activeOnlineProvider : activeLlmProvider;
   renderProviderOptions(selectedId);
+  const providerId = currentProviderId();
+  editingProviderProfileIds[providerId] = getActiveProviderProfileStorageKey(providerId);
   applyProviderProfileToInputs();
 });
 
 providerSelect?.addEventListener('change', () => {
+  const providerId = currentProviderId();
+  editingProviderProfileIds[providerId] = getActiveProviderProfileStorageKey(providerId);
   applyProviderProfileToInputs();
+});
+newProviderProfileBtn?.addEventListener('click', () => void createProviderProfile(false));
+duplicateProviderProfileBtn?.addEventListener('click', () => void createProviderProfile(true));
+deleteProviderProfileBtn?.addEventListener('click', () => void deleteCurrentProviderProfile());
+[
+  providerProfileNameInput,
+  providerBaseUrlInput,
+  providerApiKeyInput,
+  providerModelInput,
+  providerRegionInput,
+  providerAppIdInput,
+  providerAppSecretInput,
+  providerSystemPromptInput,
+  providerUserPromptInput
+].filter(Boolean).forEach((input) => {
+  input.addEventListener('input', () => setProviderProfileStatus('有未保存的更改', 'neutral'));
 });
 
 saveProviderProfileBtn?.addEventListener('click', async () => {
@@ -2020,7 +2596,7 @@ testProviderBtn?.addEventListener('click', async () => {
     actionButtons.forEach((button) => { button.disabled = false; });
     testProviderBtn.classList.remove('loading');
     testProviderBtn.removeAttribute('aria-busy');
-    testProviderBtn.textContent = previous || '测试连接';
+    testProviderBtn.textContent = previous || '保存并测试';
   }
 });
 
@@ -2069,8 +2645,7 @@ structuredPageBtn?.addEventListener('click', async () => {
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['contentScript.js'] });
     const response = await chrome.tabs.sendMessage(tab.id, {
       type: 'OPEN_STRUCTURED_PAGE_READER',
-      targetLang: targetSelect.value,
-      engineId: defaultEngineSelect?.value || TRANSLATION_ENGINE_LOCAL
+      targetLang: targetSelect.value
     });
     if (!response?.ok) throw new Error(response?.error || '结构化阅读未启动');
     setStatus('已打开结构化双语阅读页', 'ok');

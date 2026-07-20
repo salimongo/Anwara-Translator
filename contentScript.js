@@ -1,12 +1,20 @@
 // contentScript.js - Translate page text in-place using Chrome Translator API, preserving layout
 
 (() => {
-  // Check if this script has already been loaded to prevent multiple instances
+  const CONTENT_SCRIPT_VERSION = '1.6.15';
+  // Existing pages keep their old listeners. Tell the user the safe refresh boundary.
   if (window.translatorContentScriptLoaded) {
-    console.log('Translator content script already loaded, skipping...');
+    if (window.translatorContentScriptVersion !== CONTENT_SCRIPT_VERSION && !document.getElementById('anwara-translator-refresh-notice')) {
+      const notice = document.createElement('div');
+      notice.id = 'anwara-translator-refresh-notice';
+      notice.textContent = '当前网页仍在运行旧版划词逻辑，翻译结果可能不会写入历史。刷新此页面后继续。';
+      notice.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:min(360px,calc(100vw - 32px));padding:10px 12px;border:1px solid rgba(147,197,253,.7);border-radius:8px;background:#172033;color:#e0f2fe;font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 10px 28px rgba(0,0,0,.32);';
+      document.documentElement.appendChild(notice);
+    }
     return;
   }
   window.translatorContentScriptLoaded = true;
+  window.translatorContentScriptVersion = CONTENT_SCRIPT_VERSION;
   const localizedMessage = (key, fallback, substitutions) => {
     try {
       return window.AnwaraI18n?.t(key, fallback, substitutions) || fallback || key;
@@ -31,6 +39,7 @@
   let selectionTimeout = null;
   let isTranslatingSelection = false;
   let lastTranslatedText = null; // Track last translated text to avoid duplicates
+  let lastSelectionRequest = null; // Allows retry after browser selection has vanished.
   let isInitialized = false; // Prevent multiple initializations
   let selectionTranslateEnabled = false; // Control whether selection translation is enabled
   const SELECTION_SHOW_BILINGUAL_KEY = 'translatorSelectionShowBilingual';
@@ -41,12 +50,18 @@
   let selectionPanelHideTimer = null;
   let selectionPanelPosition = null;
   let selectionPanelSize = null;
+  let selectionPanelDefaultSize = null;
+  let selectionPanelUseGlobalDefaultSize = false;
+  let selectionPanelRememberSiteSize = true;
   let selectionPanelDrag = null;
   let selectionPanelResize = null;
   let selectionPanelInteractionUntil = 0;
   const translationPanels = new Map();
   let nextTranslationPanelId = 1;
   const SELECTION_PANEL_POSITIONS_KEY = 'translatorSelectionPanelPositions';
+  const SELECTION_PANEL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelDefaultSize';
+  const SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelUseGlobalDefaultSize';
+  const SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY = 'translatorSelectionPanelRememberSiteSize';
   const TRANSLATION_HISTORY_KEY = 'translatorHistory';
   const TRANSLATION_READING_KEY = 'translatorReadingArea';
   const TRANSLATION_HISTORY_ENABLED_KEY = 'translatorHistoryEnabled';
@@ -56,6 +71,8 @@
   const MIN_PANEL_HEIGHT = 180;
   const DEFAULT_PANEL_WIDTH = 360;
   const DEFAULT_PANEL_HEIGHT = 220;
+  const MAX_PANEL_WIDTH = 1600;
+  const MAX_PANEL_HEIGHT = 1200;
   // 2000 个字符覆盖普通多行选区，同时避免误选整页造成大段翻译。
   const MAX_SELECTION_TRANSLATE_LENGTH = 12000;
   const MAX_STRUCTURED_BLOCKS = 80;
@@ -65,6 +82,8 @@
   const TRANSLATION_SITE_ENGINES_KEY = 'translatorSiteDefaultEngines';
   const TRANSLATION_ONLINE_PROVIDER_KEY = 'translatorOnlineProvider';
   const TRANSLATION_LLM_PROVIDER_KEY = 'translatorLlmProvider';
+  const TRANSLATION_PROVIDER_ACTIVE_PROFILE_KEY = 'translatorProviderActiveProfileIds';
+  const TRANSLATION_PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
   const TRANSLATION_ENGINE_LOCAL = 'local';
   const TRANSLATION_ENGINE_META = {
     local: {
@@ -223,6 +242,27 @@
       : loadEffectiveTranslationProvider(normalized);
   }
 
+  async function resolveTranslationProviderProfileKey(providerId) {
+    if (!providerId || providerId === 'browser-translator') return '';
+    try {
+      const settings = await chrome.storage.local.get([TRANSLATION_PROVIDER_ACTIVE_PROFILE_KEY]);
+      return settings[TRANSLATION_PROVIDER_ACTIVE_PROFILE_KEY]?.[providerId] || '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function resolveTranslationProviderProfileName(providerId, providerProfileKey) {
+    if (!providerId || !providerProfileKey) return '';
+    try {
+      const settings = await chrome.storage.local.get([TRANSLATION_PROVIDER_PROFILES_KEY]);
+      const profile = settings[TRANSLATION_PROVIDER_PROFILES_KEY]?.[providerProfileKey];
+      return profile?.providerId === providerId ? String(profile.name || '').trim().slice(0, 48) : '';
+    } catch {
+      return '';
+    }
+  }
+
   const TRANSLATION_CACHE_KEY = 'translatorTranslationCache';
   const MAX_TRANSLATION_CACHE_ENTRIES = 300;
   const MAX_TRANSLATION_CACHE_TEXT_LENGTH = 12000;
@@ -231,12 +271,13 @@
   let translationCacheLoadPromise = null;
   let translationCacheWriteTimer = null;
 
-  function getTranslationCacheKey(text, sourceLang, targetLang, engineId, providerId = '') {
+  function getTranslationCacheKey(text, sourceLang, targetLang, engineId, providerId = '', providerProfileKey = '') {
     const normalizedText = normalizeTranslationLayout(text).trim();
     if (!normalizedText || normalizedText.length > MAX_TRANSLATION_CACHE_TEXT_LENGTH) return null;
     return JSON.stringify([
       resolveRequestedTranslationEngine(engineId),
       providerId || '',
+      providerProfileKey || '',
       normalizeLang(sourceLang),
       normalizeLang(targetLang),
       normalizedText
@@ -299,8 +340,8 @@
     }, 500);
   }
 
-  async function readTranslationCache(text, sourceLang, targetLang, engineId, providerId = '') {
-    const key = getTranslationCacheKey(text, sourceLang, targetLang, engineId, providerId);
+  async function readTranslationCache(text, sourceLang, targetLang, engineId, providerId = '', providerProfileKey = '') {
+    const key = getTranslationCacheKey(text, sourceLang, targetLang, engineId, providerId, providerProfileKey);
     if (!key) return null;
     await ensureTranslationCacheLoaded();
     const entry = translationCache.get(key);
@@ -309,9 +350,9 @@
     return entry.value;
   }
 
-  async function writeTranslationCache(text, sourceLang, targetLang, engineId, translation, providerId = '') {
+  async function writeTranslationCache(text, sourceLang, targetLang, engineId, translation, providerId = '', providerProfileKey = '') {
     if (typeof translation !== 'string' || !translation.trim()) return;
-    const key = getTranslationCacheKey(text, sourceLang, targetLang, engineId, providerId);
+    const key = getTranslationCacheKey(text, sourceLang, targetLang, engineId, providerId, providerProfileKey);
     if (!key) return;
     await ensureTranslationCacheLoaded();
     translationCache.set(key, { value: translation, lastUsedAt: Date.now() });
@@ -580,6 +621,7 @@
 
     const pinButton = document.createElement('button');
     const readingButton = document.createElement('button');
+    const retranslateButton = document.createElement('button');
     const closeButton = document.createElement('button');
     const panelActionButtonStyle = [
       'background:#374151',
@@ -597,7 +639,7 @@
       'place-items:center',
       'cursor:pointer'
     ].join(';');
-    for (const button of [pinButton, readingButton, closeButton]) {
+    for (const button of [pinButton, readingButton, retranslateButton, closeButton]) {
       button.style.cssText = panelActionButtonStyle;
       button.type = 'button';
     }
@@ -610,11 +652,35 @@
     resizeHandle.addEventListener('pointerup', finishSelectionPanelResize);
     resizeHandle.addEventListener('pointercancel', finishSelectionPanelResize);
     const actionBar = document.createElement('div');
-    actionBar.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;flex-wrap:nowrap;min-width:0;overflow:hidden;white-space:nowrap;';
+    actionBar.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;flex-wrap:nowrap;min-width:0;overflow:hidden;white-space:nowrap;margin-left:2px;padding-left:8px;border-left:1px solid rgba(148,163,184,.16);';
     actionBar.appendChild(copyButton);
     actionBar.appendChild(pinButton);
     actionBar.appendChild(readingButton);
+    actionBar.appendChild(retranslateButton);
     actionBar.appendChild(closeButton);
+
+    const retranslateMenu = document.createElement('div');
+    retranslateMenu.hidden = true;
+    retranslateMenu.style.cssText = 'position:absolute;right:10px;bottom:42px;display:none;align-items:center;gap:5px;padding:5px;border:1px solid rgba(148,163,184,.26);border-radius:6px;background:#172235;box-shadow:0 8px 20px rgba(0,0,0,.28);transform-origin:right bottom;z-index:1;';
+    for (const [engineId, label] of [[TRANSLATION_ENGINE_LOCAL, '本地'], ['online', '在线'], ['llm', '模型']]) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.textContent = label;
+      option.title = `使用${label}翻译重新翻译`;
+      option.style.cssText = 'height:25px;padding:0 7px;border:1px solid rgba(255,255,255,.2);border-radius:4px;background:#243247;color:#e5edf7;font-size:11px;line-height:1;white-space:nowrap;cursor:pointer;';
+      option.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const panel = tooltip._panel;
+        if (panel) void retranslatePanelWithEngine(panel, engineId);
+      });
+      retranslateMenu.appendChild(option);
+    }
+
+    const footerBar = document.createElement('div');
+    footerBar.style.cssText = 'display:flex;align-items:center;gap:8px;min-height:27px;padding-top:6px;border-top:1px solid rgba(148,163,184,.16);flex:none;min-width:0;';
+    const sourceMeta = document.createElement('span');
+    sourceMeta.style.cssText = 'display:none;align-items:center;gap:6px;flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;color:#aab8c9;font-size:10px;line-height:1.2;letter-spacing:0;padding-right:2px;';
+    footerBar.append(sourceMeta, actionBar);
 
     pinButton.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -629,6 +695,16 @@
       const panel = tooltip._panel;
       if (panel) void togglePanelReading(panel);
     });
+    retranslateButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const panel = tooltip._panel;
+      if (!panel) return;
+      const opening = retranslateMenu.hidden;
+      retranslateMenu.hidden = !opening;
+      retranslateMenu.style.display = opening ? 'flex' : 'none';
+      retranslateButton.setAttribute('aria-expanded', String(opening));
+      markSelectionPanelInteraction();
+    });
     closeButton.addEventListener('click', (e) => {
       e.stopPropagation();
       const panel = tooltip._panel;
@@ -637,7 +713,8 @@
 
     tooltip.appendChild(dragHandle);
     tooltip.appendChild(textContainer);
-    tooltip.appendChild(actionBar);
+    tooltip.appendChild(footerBar);
+    tooltip.appendChild(retranslateMenu);
     tooltip.appendChild(resizeHandle);
 
     // Store references for easy access
@@ -645,8 +722,11 @@
     tooltip._copyButton = copyButton;
     tooltip._pinButton = pinButton;
     tooltip._readingButton = readingButton;
+    tooltip._retranslateButton = retranslateButton;
+    tooltip._retranslateMenu = retranslateMenu;
     tooltip._closeButton = closeButton;
     tooltip._actionBar = actionBar;
+    tooltip._sourceMeta = sourceMeta;
     tooltip._resizeHandle = resizeHandle;
     tooltip.addEventListener('mouseenter', cancelSelectionPanelHide);
     tooltip.addEventListener('mouseleave', scheduleSelectionPanelHide);
@@ -678,24 +758,44 @@
     selectionPanelInteractionUntil = Date.now() + 900;
   }
 
+  function normalizeSelectionPanelSize(size, fallback = { width: DEFAULT_PANEL_WIDTH, height: DEFAULT_PANEL_HEIGHT }) {
+    const fallbackWidth = Number.isFinite(Number(fallback.width)) ? Number(fallback.width) : DEFAULT_PANEL_WIDTH;
+    const fallbackHeight = Number.isFinite(Number(fallback.height)) ? Number(fallback.height) : DEFAULT_PANEL_HEIGHT;
+    const requestedWidth = Number(size?.width);
+    const requestedHeight = Number(size?.height);
+    return {
+      width: Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Number.isFinite(requestedWidth) ? Math.round(requestedWidth) : fallbackWidth)),
+      height: Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, Number.isFinite(requestedHeight) ? Math.round(requestedHeight) : fallbackHeight))
+    };
+  }
+
+  function getViewportBoundedSelectionPanelSize(size) {
+    const normalized = normalizeSelectionPanelSize(size);
+    return {
+      width: Math.min(Math.max(MIN_PANEL_WIDTH, window.innerWidth - 20), normalized.width),
+      height: Math.min(Math.max(MIN_PANEL_HEIGHT, window.innerHeight - 20), normalized.height)
+    };
+  }
+
   async function loadSelectionPanelPosition() {
     try {
-      const result = await chrome.storage.local.get([SELECTION_PANEL_POSITIONS_KEY]);
+      const result = await chrome.storage.local.get([SELECTION_PANEL_POSITIONS_KEY, SELECTION_PANEL_DEFAULT_SIZE_KEY, SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY, SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY]);
       const layouts = result[SELECTION_PANEL_POSITIONS_KEY] || {};
       const saved = layouts[getSelectionPanelStorageKey()];
+      selectionPanelDefaultSize = normalizeSelectionPanelSize(result[SELECTION_PANEL_DEFAULT_SIZE_KEY]);
+      selectionPanelUseGlobalDefaultSize = result[SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY] === true;
+      selectionPanelRememberSiteSize = result[SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY] !== false;
       if (saved && Number.isFinite(Number(saved.left)) && Number.isFinite(Number(saved.top))) {
         selectionPanelPosition = {
           left: Number(saved.left),
           top: Number(saved.top)
         };
       }
-      if (saved && Number.isFinite(Number(saved.width)) && Number.isFinite(Number(saved.height))) {
-        selectionPanelSize = {
-          width: Math.max(240, Number(saved.width)),
-          height: Math.max(MIN_PANEL_HEIGHT, Number(saved.height))
-        };
+      if (selectionPanelRememberSiteSize && saved && Number.isFinite(Number(saved.width)) && Number.isFinite(Number(saved.height))) {
+        selectionPanelSize = normalizeSelectionPanelSize(saved);
       }
     } catch (e) {
+      selectionPanelDefaultSize = normalizeSelectionPanelSize(null);
       console.warn('Failed to load selection panel layout:', e);
     }
   }
@@ -707,19 +807,17 @@
     };
     const base = selectionPanelPosition || fallback;
     const offset = (translationPanels.size % 6) * 22;
+    const requestedSize = selectionPanelUseGlobalDefaultSize
+      ? (selectionPanelDefaultSize || { width: DEFAULT_PANEL_WIDTH, height: DEFAULT_PANEL_HEIGHT })
+      : (selectionPanelSize || selectionPanelDefaultSize || { width: DEFAULT_PANEL_WIDTH, height: DEFAULT_PANEL_HEIGHT });
     return {
       position: { left: base.left + offset, top: base.top + offset },
-      size: selectionPanelSize ? {
-        width: Math.max(MIN_PANEL_WIDTH, selectionPanelSize.width),
-        height: Math.max(MIN_PANEL_HEIGHT, selectionPanelSize.height)
-      } : {
-        width: DEFAULT_PANEL_WIDTH,
-        height: DEFAULT_PANEL_HEIGHT
-      }
+      size: getViewportBoundedSelectionPanelSize(requestedSize)
     };
   }
 
   async function saveSelectionPanelPosition(panel = translationTooltip?._panel) {
+    if (panel?.isSizeTuner) return;
     const position = panel?.position || selectionPanelPosition;
     const size = panel?.size || selectionPanelSize;
     if (!position) return;
@@ -739,7 +837,7 @@
       layouts[getSelectionPanelStorageKey()] = {
         left: Math.round(position.left),
         top: Math.round(position.top),
-        ...(size ? { width: Math.round(size.width), height: Math.round(size.height) } : {})
+        ...(selectionPanelRememberSiteSize && size ? { width: Math.round(size.width), height: Math.round(size.height) } : {})
       };
       await chrome.storage.local.set({ [SELECTION_PANEL_POSITIONS_KEY]: layouts });
     } catch (e) {
@@ -796,7 +894,7 @@
       width: Math.max(MIN_PANEL_WIDTH, Math.min(maxWidth, selectionPanelResize.startWidth + event.clientX - selectionPanelResize.startX)),
       height: Math.max(MIN_PANEL_HEIGHT, Math.min(maxHeight, selectionPanelResize.startHeight + event.clientY - selectionPanelResize.startY))
     };
-    selectionPanelSize = { ...panel.size };
+    if (!panel.isSizeTuner) selectionPanelSize = { ...panel.size };
     tooltip.style.width = `${panel.size.width}px`;
     tooltip.style.height = `${panel.size.height}px`;
     event.preventDefault();
@@ -963,26 +1061,67 @@
       panel.pinned ? '取消固定面板' : '固定面板',
       panel.pinned
     );
-    panel.tooltip._readingButton.textContent = panel.inReadingArea ? '✓' : '▤';
-    panel.tooltip._readingButton.title = panel.inReadingArea ? '从阅读区移出' : '加入阅读区';
+    panel.tooltip._readingButton.disabled = panel.readingPending === true;
+    panel.tooltip._readingButton.textContent = panel.readingPending ? '…' : (panel.readingError ? '!' : (panel.inReadingArea ? '✓' : '▤'));
+    panel.tooltip._readingButton.title = panel.readingPending ? '正在保存阅读区' : (panel.readingError ? '保存失败，点击重试' : (panel.inReadingArea ? '从阅读区移出' : '加入阅读区'));
+    setPanelIcon(
+      panel.tooltip._retranslateButton,
+      '<path d="M19 8V4h-4"/><path d="M5 16v4h4"/><path d="M5.5 8.5A7 7 0 0 1 17 6l2 2"/><path d="M18.5 15.5A7 7 0 0 1 7 18l-2-2"/>',
+      '选择翻译方式重新翻译'
+    );
     panel.tooltip._closeButton.textContent = '×';
     panel.tooltip._closeButton.title = '关闭面板';
   }
 
+  function getTranslationVariantKey(engineId, providerId, providerProfileKey, sourceLang, targetLang) {
+    return [
+      resolveRequestedTranslationEngine(engineId),
+      providerId || 'browser-translator',
+      providerProfileKey || 'default',
+      sourceLang || 'auto',
+      targetLang || 'zh-Hans'
+    ].map((value) => String(value).trim()).join('|');
+  }
+
   function createTranslationRecord(data, inReadingArea = false) {
+    const engineId = resolveRequestedTranslationEngine(data.engineId);
+    const providerId = data.providerId || getTranslationEngineMetadata(data.engineId).providerId;
+    const providerProfileKey = data.providerProfileKey || '';
+    const sourceText = normalizeTranslationLayout(data.sourceText);
+    const translatedText = normalizeTranslationLayout(data.translatedText);
+    const sourceLang = data.sourceLang || 'auto';
+    const targetLang = data.targetLang || 'zh-Hans';
+    const structuredBlocks = Array.isArray(data.structuredBlocks) ? data.structuredBlocks : null;
+    const translationVariants = data.translationVariants && typeof data.translationVariants === 'object'
+      ? { ...data.translationVariants }
+      : {};
+    const variantKey = getTranslationVariantKey(engineId, providerId, providerProfileKey, sourceLang, targetLang);
+    if (!translationVariants[variantKey]) {
+      translationVariants[variantKey] = {
+        translatedText,
+        structuredBlocks,
+        engineId,
+        engineStage: data.engineStage || getTranslationEngineMetadata(data.engineId).stage,
+        providerId,
+        providerProfileKey,
+        translatedAt: Date.now()
+      };
+    }
     return {
       id: `translation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      sourceText: normalizeTranslationLayout(data.sourceText),
-      translatedText: normalizeTranslationLayout(data.translatedText),
-      sourceLang: data.sourceLang || 'auto',
-      targetLang: data.targetLang || 'zh-Hans',
+      sourceText,
+      translatedText,
+      sourceLang,
+      targetLang,
       pageUrl: location.href,
       pageTitle: document.title || location.hostname,
       createdAt: Date.now(),
-      engineId: resolveRequestedTranslationEngine(data.engineId),
+      engineId,
       engineStage: data.engineStage || getTranslationEngineMetadata(data.engineId).stage,
-      providerId: data.providerId || getTranslationEngineMetadata(data.engineId).providerId,
-      structuredBlocks: Array.isArray(data.structuredBlocks) ? data.structuredBlocks : null,
+      providerId,
+      providerProfileKey,
+      structuredBlocks,
+      translationVariants,
       inReadingArea
     };
   }
@@ -993,7 +1132,8 @@
       writeReading = false,
       forceHistory = false,
       transientReader = false,
-      userApprovedReading = false
+      userApprovedReading = false,
+      throwOnError = false
     } = options;
     if (transientReader) return createTranslationRecord(data, false);
     try {
@@ -1028,7 +1168,64 @@
       return item;
     } catch (e) {
       console.warn('Failed to save translation record:', e);
+      if (throwOnError) throw e;
       return null;
+    }
+  }
+
+  async function retryPanelHistorySave(panel) {
+    if (!panel?.historyData || panel.historySavePending) return;
+    panel.historySavePending = true;
+    panel.historySaveError = false;
+    if (panel.tooltip?._historyRetryButton) {
+      panel.tooltip._historyRetryButton.disabled = true;
+      panel.tooltip._historyRetryButton.textContent = '保存中';
+    }
+    try {
+      const record = await saveTranslationHistory(panel.historyData, { forceHistory: true, throwOnError: true });
+      if (!record?.id) throw new Error('HISTORY_SAVE_SKIPPED');
+      panel.historyId = record.id;
+      panel.inReadingArea = record.inReadingArea === true;
+      panel.historySaveError = false;
+      panel.tooltip?._historyRetryButton?.remove?.();
+      panel.tooltip._historyRetryButton = null;
+    } catch (error) {
+      panel.historySaveError = true;
+      if (panel.tooltip?._historyRetryButton) {
+        panel.tooltip._historyRetryButton.disabled = false;
+        panel.tooltip._historyRetryButton.textContent = '重试保存';
+        panel.tooltip._historyRetryButton.title = '历史保存失败，点击重试';
+      }
+      console.warn('Failed to retry selection history save:', error);
+    } finally {
+      panel.historySavePending = false;
+      updateTranslationPanelButtons(panel);
+    }
+  }
+
+  async function retranslatePanelWithEngine(panel, engineId) {
+    if (!panel?.tooltip || panel.retranslateBusy) return;
+    panel.retranslateBusy = true;
+    panel.tooltip._retranslateButton.disabled = true;
+    panel.tooltip._retranslateMenu.hidden = true;
+    panel.tooltip._retranslateMenu.style.display = 'none';
+    panel.tooltip._retranslateButton.setAttribute('aria-expanded', 'false');
+    const request = {
+      force: true,
+      allowUi: true,
+      preferText: true,
+      openImmediately: true,
+      text: panel.sourceText,
+      sourceLang: panel.sourceLang,
+      structuredBlocks: panel.structuredBlocks || [],
+      anchor: panel.anchor,
+      engineId
+    };
+    panel.pinned = false;
+    try {
+      await handleTextSelection(request);
+    } finally {
+      panel.retranslateBusy = false;
     }
   }
 
@@ -1048,7 +1245,8 @@
     }
   }
 
-  async function updateReadingAreaRecord(id, record, enabled) {
+  async function updateReadingAreaRecord(id, record, enabled, options = {}) {
+    const { throwOnError = false } = options;
     if (!id && !record) return;
     try {
       const result = await chrome.storage.local.get([TRANSLATION_READING_KEY, TRANSLATION_HISTORY_KEY]);
@@ -1064,29 +1262,19 @@
         readingItems = readingItems.filter((entry) => entry.id !== recordId);
       }
       await chrome.storage.local.set({ [TRANSLATION_READING_KEY]: readingItems });
+      return readingItems;
     } catch (e) {
       console.warn('Failed to update reading area:', e);
+      if (throwOnError) throw e;
+      return null;
     }
   }
 
   async function togglePanelReading(panel) {
-    panel.inReadingArea = !panel.inReadingArea;
-    if (panel.inReadingArea && !panel.historyId) {
-      const record = await saveTranslationHistory({
-        sourceText: panel.sourceText,
-        translatedText: panel.translatedText,
-        sourceLang: panel.sourceLang,
-        targetLang: panel.targetLang,
-        structuredBlocks: panel.structuredBlocks,
-        engineId: panel.engineId,
-        engineStage: getTranslationEngineMetadata(panel.engineId).stage,
-        providerId: panel.providerId
-      }, { writeHistory: false, writeReading: true, userApprovedReading: true });
-      panel.historyId = record?.id || null;
-      if (!record) panel.inReadingArea = false;
-    }
-    updateTranslationPanelButtons(panel);
-    await updateReadingAreaRecord(panel.historyId, {
+    if (!panel || panel.readingPending) return;
+    const previous = panel.inReadingArea === true;
+    const next = !previous;
+    const recordData = {
       id: panel.historyId,
       sourceText: panel.sourceText,
       translatedText: panel.translatedText,
@@ -1096,10 +1284,31 @@
       engineId: panel.engineId,
       engineStage: getTranslationEngineMetadata(panel.engineId).stage,
       providerId: panel.providerId,
+      providerProfileKey: panel.providerProfileKey,
       pageUrl: location.href,
       pageTitle: document.title || location.hostname,
       createdAt: Date.now()
-    }, panel.inReadingArea);
+    };
+    panel.readingPending = true;
+    updateTranslationPanelButtons(panel);
+    try {
+      if (next && !panel.historyId) {
+        const record = await saveTranslationHistory(recordData, { writeHistory: false, writeReading: true, userApprovedReading: true, throwOnError: true });
+        if (!record?.id) throw new Error('READING_SAVE_FAILED');
+        panel.historyId = record.id;
+      } else {
+        await updateReadingAreaRecord(panel.historyId, recordData, next, { throwOnError: true });
+      }
+      panel.inReadingArea = next;
+      panel.readingError = false;
+    } catch (error) {
+      panel.inReadingArea = previous;
+      panel.readingError = true;
+      console.warn('Failed to update reading-area state:', error);
+    } finally {
+      panel.readingPending = false;
+      updateTranslationPanelButtons(panel);
+    }
   }
 
   function removeTranslationPanel(id) {
@@ -1154,6 +1363,11 @@
     cancelSelectionPanelHide();
     const panel = translationTooltip?._panel;
     if (!panel || panel.pinned) return;
+    if (panel.openImmediately) {
+      panel.openImmediately = false;
+      openSelectionPanel();
+      return;
+    }
     translationTooltip.style.opacity = '0';
     translationTooltip.style.transform = 'translateY(-4px)';
     translationTooltip.style.pointerEvents = 'none';
@@ -1221,7 +1435,10 @@
       sourceLang: options.sourceLang || 'auto',
       targetLang: options.targetLang || 'zh-Hans',
       structuredBlocks: Array.isArray(options.structuredBlocks) ? options.structuredBlocks : null,
+      historyData: options.historyData || null,
       historyId: historyRecord?.id || null,
+      historySaveError: options.historySaveError === true,
+      historySavePending: false,
       inReadingArea: historyRecord?.inReadingArea === true,
       pinned: false,
       position: layout.position,
@@ -1229,7 +1446,13 @@
       initializing: true,
       status: options.status || 'ready',
       engineId: resolveRequestedTranslationEngine(options.engineId),
-      providerId: options.providerId || getTranslationEngineMetadata(options.engineId).providerId
+      providerId: options.providerId || getTranslationEngineMetadata(options.engineId).providerId,
+      providerProfileKey: options.providerProfileKey || '',
+      providerProfileName: options.providerProfileName || '',
+      cacheTrace: options.cacheTrace || null,
+      anchor,
+      retranslateBusy: false,
+      openImmediately: options.openImmediately === true
     };
     tooltip._panel = panel;
     const normalizedText = normalizeTranslationLayout(text);
@@ -1239,13 +1462,31 @@
     } else {
       tooltip._textContainer.textContent = '';
       if (options.showSource !== false) {
-        tooltip._textContainer.style.paddingBottom = '16px';
-        const sourceBadge = document.createElement('span');
-        sourceBadge.textContent = getTranslationEngineSourceLabel(panel.engineId, panel.providerId);
-        sourceBadge.title = `${getTranslationEngineSourceLabel(panel.engineId, panel.providerId)} · ${formatTranslationSource(panel.sourceLang, panel.targetLang)}`;
-        sourceBadge.setAttribute('aria-label', sourceBadge.title);
-        sourceBadge.style.cssText = 'position:absolute;left:12px;bottom:6px;color:#8290a4;font-size:9px;line-height:1;letter-spacing:.1px;cursor:help;opacity:.82;user-select:none;';
-        tooltip.appendChild(sourceBadge);
+        const sourceBadge = tooltip._sourceMeta;
+        const engineLabel = getTranslationEngineSourceLabel(panel.engineId, panel.providerId);
+        const providerLabel = panel.engineId === TRANSLATION_ENGINE_LOCAL
+          ? engineLabel
+          : (TRANSLATION_PROVIDER_LABELS[panel.providerId] || panel.providerId || engineLabel);
+        const cacheLabel = panel.cacheTrace
+          ? (panel.cacheTrace.hits > 0 && panel.cacheTrace.misses === 0
+            ? '缓存命中'
+            : panel.cacheTrace.hits > 0
+              ? `缓存 ${panel.cacheTrace.hits}/${panel.cacheTrace.hits + panel.cacheTrace.misses}`
+              : '已请求')
+          : '';
+        if (sourceBadge) {
+          sourceBadge.style.display = 'flex';
+          sourceBadge.textContent = '';
+          const details = document.createElement('span');
+          details.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+          details.textContent = [providerLabel, panel.providerProfileName].filter(Boolean).join(' / ');
+          const state = document.createElement('span');
+          state.style.cssText = `flex:none;color:${cacheLabel === '缓存命中' ? '#7bd8a2' : cacheLabel === '已请求' ? '#91c9ff' : '#c4ccd6'};font-weight:600;`;
+          state.textContent = cacheLabel;
+          sourceBadge.append(details, state);
+          sourceBadge.title = [engineLabel, panel.providerProfileName, cacheLabel, formatTranslationSource(panel.sourceLang, panel.targetLang)].filter(Boolean).join(' · ');
+          sourceBadge.setAttribute('aria-label', sourceBadge.title);
+        }
       }
       if (options.showBilingual !== false) {
         const sourceBlock = document.createElement('div');
@@ -1258,9 +1499,17 @@
       translatedBlock.style.cssText = `color:#fff;font-size:13px;font-weight:${panel.targetLang === 'zh-Hans' || panel.targetLang === 'zh-Hant' ? '600' : '500'};line-height:1.6;white-space:pre-wrap;`;
       tooltip._textContainer.appendChild(translatedBlock);
     }
-    if (options.status === 'loading' || options.status === 'error') {
-      tooltip._actionBar.style.display = 'none';
+    if (panel.historySaveError) {
+      const retryHistoryButton = document.createElement('button');
+      retryHistoryButton.type = 'button';
+      retryHistoryButton.textContent = '重试保存';
+      retryHistoryButton.title = '历史保存失败，点击重试';
+      retryHistoryButton.style.cssText = 'height:25px;padding:0 7px;border:1px solid rgba(255,255,255,.24);border-radius:4px;background:#7f1d1d;color:#fff;font-size:11px;line-height:1;white-space:nowrap;cursor:pointer;';
+      retryHistoryButton.addEventListener('click', (event) => { event.stopPropagation(); void retryPanelHistorySave(panel); });
+      tooltip._actionBar.insertBefore(retryHistoryButton, tooltip._closeButton);
+      tooltip._historyRetryButton = retryHistoryButton;
     }
+    if (options.status === 'loading') tooltip._actionBar.style.display = 'none';
     if (options.background) tooltip.style.background = options.background;
     document.body.appendChild(tooltip);
     translationPanels.set(panel.id, panel);
@@ -1279,18 +1528,78 @@
     return createTranslationPanel(text, anchor, options);
   }
 
-  function showLoadingTooltip(anchor) {
+  function openSelectionPanelSizeTuner() {
+    const existing = [...translationPanels.values()].find((panel) => panel.isSizeTuner);
+    if (existing?.tooltip?.isConnected) {
+      existing.tooltip.style.display = 'block';
+      applySelectionPanelPosition(existing.tooltip);
+      return existing;
+    }
+    const panel = createTranslationPanel('这是调试译文。拖动右下角调整大小，满意后再保存。', null, {
+      sourceText: 'This is a size tuning panel. It does not translate or enter history.',
+      sourceLang: 'en',
+      targetLang: 'zh-Hans',
+      showBilingual: true,
+      showSource: false,
+      openImmediately: true
+    });
+    panel.isSizeTuner = true;
+    panel.pinned = true;
+    const { tooltip } = panel;
+    tooltip._copyButton.style.display = 'none';
+    tooltip._readingButton.style.display = 'none';
+    tooltip._pinButton.style.display = 'none';
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.textContent = '保存为全局大小';
+    saveButton.style.cssText = 'height:25px;padding:0 8px;border:1px solid #4b9ff0;border-radius:4px;background:#1d4f78;color:#eaf6ff;font-size:11px;white-space:nowrap;cursor:pointer;';
+    saveButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const size = normalizeSelectionPanelSize(panel.size);
+      await chrome.storage.local.set({ [SELECTION_PANEL_DEFAULT_SIZE_KEY]: size });
+      selectionPanelDefaultSize = size;
+      saveButton.textContent = '已保存';
+      setTimeout(() => { if (saveButton.isConnected) saveButton.textContent = '保存为全局大小'; }, 1200);
+    });
+    tooltip._actionBar.insertBefore(saveButton, tooltip._closeButton);
+    return panel;
+  }
+
+  function showLoadingTooltip(anchor, options = {}) {
     return createTranslationPanel('翻译中...', anchor, {
       status: 'loading',
-      background: '#374151'
+      background: '#374151',
+      openImmediately: options.openImmediately === true
     });
   }
 
-  function showErrorTooltip(message, anchor) {
-    return createTranslationPanel(message, anchor, {
-      status: 'error',
-      background: '#dc2626'
-    });
+  function addErrorPanelActions(panel, retryRequest) {
+    if (!panel?.tooltip || !retryRequest) return;
+    const tooltip = panel.tooltip;
+    tooltip._actionBar.style.display = 'flex';
+    tooltip._copyButton.style.display = 'none';
+    tooltip._pinButton.style.display = 'none';
+    tooltip._readingButton.style.display = 'none';
+    tooltip._retryActions?.remove?.();
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;align-items:center;gap:4px;min-width:0;';
+    for (const [engineId, label] of [['', '重试'], [TRANSLATION_ENGINE_LOCAL, '本地'], ['online', '在线'], ['llm', '大模型']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.title = engineId ? '使用' + label + '翻译' : '按原方式重试';
+      button.style.cssText = 'height:25px;padding:0 7px;border:1px solid rgba(255,255,255,.24);border-radius:4px;background:#374151;color:#fff;font-size:11px;line-height:1;white-space:nowrap;cursor:pointer;';
+      button.addEventListener('click', (event) => { event.stopPropagation(); void handleTextSelection({ ...retryRequest, force: true, allowUi: true, engineId: engineId || retryRequest.engineId }); });
+      actions.appendChild(button);
+    }
+    tooltip._actionBar.insertBefore(actions, tooltip._closeButton);
+    tooltip._retryActions = actions;
+  }
+
+  function showErrorTooltip(message, anchor, retryRequest = null) {
+    const panel = createTranslationPanel(message, anchor, { status: 'error', background: '#dc2626' });
+    addErrorPanelActions(panel, retryRequest);
+    return panel;
   }
 
   const EXCLUDED = new Set(['SCRIPT','STYLE','NOSCRIPT','IFRAME','CANVAS','SVG','CODE','PRE','TEXTAREA','INPUT','BUTTON','SELECT']);
@@ -1733,11 +2042,11 @@
     }, 0);
   }
 
-  async function translateStructuredBlocks(blocks, sourceLang, targetLang, engineId) {
+  async function translateStructuredBlocks(blocks, sourceLang, targetLang, engineId, providerProfileKey = '', cacheTrace = null) {
     const total = countStructuredTranslationUnits(blocks);
     let completed = 0;
     const translateOne = async (text) => {
-      const translatedText = await translateSelectedText(text, sourceLang, targetLang, 3, engineId);
+      const translatedText = await translateSelectedText(text, sourceLang, targetLang, 3, engineId, providerProfileKey, cacheTrace);
       completed += 1;
       showOverlay(`正在翻译结构化内容 (${completed}/${total})...`);
       if (completed >= total) setTimeout(hideOverlay, 900);
@@ -1807,15 +2116,16 @@
     const effectiveTargetLang = translateSameLanguage
       ? (getNextTargetLanguage(targetLang) || targetLang)
       : targetLang;
+    const providerId = await resolveTranslationProviderId(engineId);
+    const providerProfileKey = await resolveTranslationProviderProfileKey(providerId);
     const translatedBlocks = sameLanguage && !translateSameLanguage
       ? copyStructuredBlocksAsOriginal(blocks)
-      : await translateStructuredBlocks(blocks, sourceLang, effectiveTargetLang, engineId);
+      : await translateStructuredBlocks(blocks, sourceLang, effectiveTargetLang, engineId, providerProfileKey);
     const translatedText = sameLanguage && !translateSameLanguage
       ? sourceText
       : formatStructuredBlocks(translatedBlocks, 'translatedText');
     if (sameLanguage && !translateSameLanguage) showOverlay('检测到页面已经是目标语言，保留原文结构');
     const metadata = getTranslationEngineMetadata(engineId);
-    const providerId = await resolveTranslationProviderId(engineId);
     hideOverlay();
     return saveTranslationHistory({
       sourceText,
@@ -1825,6 +2135,7 @@
       engineId,
       engineStage: metadata.stage,
       providerId,
+      providerProfileKey,
       structuredBlocks: translatedBlocks
     }, { transientReader: true });
   }
@@ -1999,8 +2310,15 @@
     const providerId = engineId === TRANSLATION_ENGINE_LOCAL
       ? ''
       : (options.providerId || await loadEffectiveTranslationProvider(engineId));
-    const cached = await readTranslationCache(text, sourceLang, targetLang, engineId, providerId);
-    if (cached !== null) return cached;
+    const providerProfileKey = engineId === TRANSLATION_ENGINE_LOCAL
+      ? ''
+      : (options.providerProfileKey || await resolveTranslationProviderProfileKey(providerId));
+    const cached = await readTranslationCache(text, sourceLang, targetLang, engineId, providerId, providerProfileKey);
+    if (cached !== null) {
+      if (options.cacheTrace) options.cacheTrace.hits += 1;
+      return cached;
+    }
+    if (options.cacheTrace) options.cacheTrace.misses += 1;
 
     let translation;
     if (engineId !== TRANSLATION_ENGINE_LOCAL) {
@@ -2009,7 +2327,8 @@
         text,
         sourceLang,
         targetLang,
-        providerId
+        providerId,
+        profileKey: providerProfileKey
       });
       if (!response?.ok) throw new Error(response?.error || 'PROVIDER_TRANSLATION_FAILED');
       translation = response.translation;
@@ -2019,7 +2338,7 @@
       translation = await engine.translate(text);
     }
 
-    await writeTranslationCache(text, sourceLang, targetLang, engineId, translation, providerId);
+    await writeTranslationCache(text, sourceLang, targetLang, engineId, translation, providerId, providerProfileKey);
     return translation;
   }
 
@@ -2051,7 +2370,7 @@
   }
 
   // Translate selected text with automatic fallback for unsupported language pairs
-  async function translateSelectedText(text, sourceLang, targetLang, maxRetries = 3, engineId = null) {
+  async function translateSelectedText(text, sourceLang, targetLang, maxRetries = 3, engineId = null, providerProfileKey = '', cacheTrace = null) {
     const selectedEngineId = resolveRequestedTranslationEngine(engineId || await loadEffectiveTranslationEngine());
     const sameLanguageMode = await loadSameLanguageMode();
     let currentTargetLang = targetLang;
@@ -2069,7 +2388,9 @@
 
         const translation = await translateWithEngine(text, sourceLang, currentTargetLang, {
           engineId: selectedEngineId,
-          channel: 'selection'
+          channel: 'selection',
+          providerProfileKey,
+          cacheTrace
         });
 
         // If we had to switch languages, log it
@@ -2255,7 +2576,7 @@
   async function handleTextSelection(options = {}) {
     const timestamp = Date.now();
     const force = options.force === true;
-    if (isSelectionInsideTranslatorUi()) {
+    if (isSelectionInsideTranslatorUi() && !options.allowUi) {
       if (selectionIndicator) selectionIndicator.style.display = 'none';
       markSelectionPanelInteraction();
       return;
@@ -2278,8 +2599,9 @@
     }
 
     const selection = window.getSelection();
-    const hasLiveSelection = Boolean(selection && selection.rangeCount > 0 && selection.toString().trim());
-    const forcedText = hasLiveSelection ? '' : normalizeTranslationLayout(options.text || '').trim();
+    const preferredText = options.preferText === true ? normalizeTranslationLayout(options.text || '').trim() : '';
+    const hasLiveSelection = !preferredText && Boolean(selection && selection.rangeCount > 0 && selection.toString().trim());
+    const forcedText = preferredText || (hasLiveSelection ? '' : normalizeTranslationLayout(options.text || '').trim());
     if (!hasLiveSelection && !forcedText) {
       if (Date.now() < selectionPanelInteractionUntil) return;
       hideTranslationTooltip();
@@ -2288,7 +2610,9 @@
     }
 
     const selectedText = forcedText || normalizeTranslationLayout(selection.toString()).trim();
-    const structuredBlocks = !forcedText ? extractStructuredBlocksFromSelection(selection) : [];
+    const structuredBlocks = Array.isArray(options.structuredBlocks)
+      ? options.structuredBlocks
+      : (!forcedText ? extractStructuredBlocksFromSelection(selection) : []);
     const displaySourceText = structuredBlocks.length
       ? formatStructuredBlocks(structuredBlocks, 'sourceText')
       : selectedText;
@@ -2331,30 +2655,29 @@
     window.translatorGlobalLock = true;
 
     // Anchor to the selection when available; explicit context-menu requests can fall back to the viewport.
-    const selectionAnchor = selection && selection.rangeCount > 0
+    const selectionAnchor = options.anchor || (selection && selection.rangeCount > 0
       ? getSelectionAnchorRect(selection)
-      : new DOMRect(Math.max(12, window.innerWidth / 2 - 8), Math.max(12, window.innerHeight / 2 - 8), 16, 16);
+      : new DOMRect(Math.max(12, window.innerWidth / 2 - 8), Math.max(12, window.innerHeight / 2 - 8), 16, 16));
 
     isTranslatingSelection = true;
 
     try {
       // Show loading indicator beside the selection.
-      showLoadingTooltip(selectionAnchor);
+      showLoadingTooltip(selectionAnchor, { openImmediately: options.openImmediately === true });
 
-      // Get target language from storage or use default
-      let targetLang = 'zh-Hans'; // Keep selection translation consistent with the extension default
-      try {
-        const result = await chrome.storage.sync.get(['autoTranslateTargetLang']);
-        if (result.autoTranslateTargetLang) {
-          targetLang = result.autoTranslateTargetLang;
+      // Reuse the previous language pair on retry; ordinary selection follows the default.
+      let targetLang = normalizeLang(options.targetLang) || 'zh-Hans';
+      if (!options.targetLang) {
+        try {
+          const result = await chrome.storage.sync.get(['autoTranslateTargetLang']);
+          if (result.autoTranslateTargetLang) targetLang = result.autoTranslateTargetLang;
+        } catch (e) {
+          console.warn('Failed to get target language from storage, using default:', e);
         }
-      } catch (e) {
-        // Use default if storage access fails
-        console.warn('Failed to get target language from storage, using default:', e);
       }
 
       // Detect source language
-      const detectedLang = await detectTextLanguage(selectedText);
+      const detectedLang = options.sourceLang || await detectTextLanguage(selectedText);
       const sourceLang = normalizeLang(detectedLang || inferLanguageFromText(selectedText));
       if (!sourceLang) throw new Error('无法判断选中文本的原文语言。');
 
@@ -2368,45 +2691,66 @@
         targetLang = getNextTargetLanguage(targetLang) || targetLang;
       }
 
+      lastSelectionRequest = { text: selectedText, sourceLang, targetLang, anchor: selectionAnchor, structuredBlocks, engineId: requestedEngineId };
       console.log(`[${timestamp}] Translating: "${selectedText}" (${sourceLang} -> ${targetLang})`);
 
       // Translate block-by-block when the selection still has recoverable structure.
       const engineId = requestedEngineId;
       const engineMetadata = getTranslationEngineMetadata(engineId);
       const providerId = await resolveTranslationProviderId(engineId);
+      const providerProfileKey = await resolveTranslationProviderProfileKey(providerId);
       console.log(`[${timestamp}] Engine: ${engineMetadata.stage}/${engineMetadata.providerId}`);
+      const cacheTrace = { hits: 0, misses: 0 };
       let translatedStructuredBlocks = null;
       const translation = structuredBlocks.length
         ? formatStructuredBlocks(
-            translatedStructuredBlocks = await translateStructuredBlocks(structuredBlocks, sourceLang, targetLang, engineId),
+            translatedStructuredBlocks = await translateStructuredBlocks(structuredBlocks, sourceLang, targetLang, engineId, providerProfileKey, cacheTrace),
             'translatedText'
           )
-        : await translateSelectedText(selectedText, sourceLang, targetLang, 3, engineId);
+        : await translateSelectedText(selectedText, sourceLang, targetLang, 3, engineId, providerProfileKey, cacheTrace);
 
       if (translation && translation !== selectedText) {
         // Store the translated text to avoid duplicates
         lastTranslatedText = selectedText;
 
-        // Save the successful translation once, then expose panel actions for it.
-        const historyRecord = await saveTranslationHistory({
+        // Persist before showing panel actions. A storage failure remains visible and retryable.
+        const historyData = {
           sourceText: displaySourceText,
           translatedText: translation,
           sourceLang,
           targetLang,
           engineId,
           engineStage: engineMetadata.stage,
-           providerId,
+          providerId,
+          providerProfileKey,
           structuredBlocks: translatedStructuredBlocks
-        });
-        const displaySettings = await loadSelectionDisplaySettings();
+        };
+        let historyRecord = null;
+        let historySaveError = false;
+        try {
+          historyRecord = await saveTranslationHistory(historyData, { throwOnError: true });
+        } catch (historyError) {
+          historySaveError = true;
+          console.warn('Selection translation rendered but history save failed:', historyError);
+        }
+        const [displaySettings, providerProfileName] = await Promise.all([
+          loadSelectionDisplaySettings(),
+          resolveTranslationProviderProfileName(providerId, providerProfileKey)
+        ]);
         showTranslationTooltip(translation, selectionAnchor, {
+          openImmediately: options.openImmediately === true,
           sourceText: displaySourceText,
           sourceLang,
           targetLang,
           historyRecord,
+          historyData,
+          historySaveError,
           structuredBlocks: translatedStructuredBlocks,
           engineId,
           providerId,
+          providerProfileKey,
+          providerProfileName,
+          cacheTrace,
           ...displaySettings
         });
         // Make sure copy button is visible
@@ -2423,14 +2767,12 @@
     } catch (e) {
       console.warn(`[${timestamp}] Selection translation failed:`, e);
 
-      // Show user-friendly error message for unsupported language pairs
-      if (e.message?.includes('Failed to translate after') ||
-          e.message?.includes('language pair is unsupported')) {
-        showErrorTooltip('该语言对不支持翻译', selectionAnchor);
-        setTimeout(hideTranslationTooltip, 3000); // Auto-hide after 3 seconds
-      } else {
-        hideTranslationTooltip();
-      }
+      const unsupported = e.message?.includes('Failed to translate after') || e.message?.includes('language pair is unsupported');
+      showErrorTooltip(
+        unsupported ? '该语言对不支持翻译，可改用其他方式重试。' : '翻译失败，可重试或切换翻译方式。',
+        selectionAnchor,
+        lastSelectionRequest
+      );
 
       lastTranslatedText = null;
     } finally {
@@ -2482,6 +2824,12 @@
     }
 
     await loadSelectionPanelPosition();
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+      if (changes[SELECTION_PANEL_DEFAULT_SIZE_KEY]) selectionPanelDefaultSize = normalizeSelectionPanelSize(changes[SELECTION_PANEL_DEFAULT_SIZE_KEY].newValue);
+      if (changes[SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY]) selectionPanelUseGlobalDefaultSize = changes[SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY].newValue === true;
+      if (changes[SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY]) selectionPanelRememberSiteSize = changes[SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY].newValue !== false;
+    });
     console.info('Translator API available. Selection translation initialized.');
 
     // Listen for selection changes
@@ -2954,8 +3302,13 @@
           sendResponse({ ok: true });
           return;
         }
+        if (msg && msg.type === 'OPEN_SELECTION_PANEL_SIZE_TUNER') {
+          const panel = openSelectionPanelSizeTuner();
+          sendResponse({ ok: true, width: panel.size.width, height: panel.size.height });
+          return;
+        }
         if (msg && msg.type === 'QUERY_STATUS') {
-          sendResponse({ ok: true, enabled, targetLang: currentTargetLang });
+          sendResponse({ ok: true, enabled, targetLang: currentTargetLang, version: CONTENT_SCRIPT_VERSION });
           return;
         }
         if (msg && msg.type === 'TOGGLE_SELECTION_TRANSLATION') {

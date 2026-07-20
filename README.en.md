@@ -37,8 +37,13 @@ and can be managed independently.
   source-only, or translation-only views.
 - Reading themes, font selection, font-size controls, table-of-contents support,
   citation navigation, and retranslation with another engine.
-- Local translation history and reading-area storage with selection, date-range,
-  and full-clear operations.
+- Local translation history and reading-area storage with search, engine/site
+  filtering, display-only duplicate merging, selection, date-range, full-clear,
+  and an 8-second delete undo.
+- Reuse one reader tab per record, plus in-page search, reading progress, and
+  local resume position.
+- Clearly disable online/LLM retranslation choices until the selected provider is
+  configured, rather than sending a request that is known to fail.
 - Floating page-translation button and browser context-menu shortcuts.
 - Per-site default engine settings and an auto-translation whitelist.
 - Chinese and English extension UI, selected automatically from the browser

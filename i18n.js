@@ -30,7 +30,11 @@
     '关闭面板': 'closePanel', '固定面板': 'pinPanel', '取消固定面板': 'unpinPanel', '加入阅读区': 'addToReading',
     '从阅读区移出': 'removeFromReading', '展开阅读': 'openReader', '删除': 'delete', '刷新历史记录': 'refreshHistory',
     '复制翻译结果': 'copyTranslationResult', '朗读翻译结果': 'speakTranslationResult', '拖动翻译窗口': 'dragTranslationPanel',
-    '调整面板大小': 'resizePanel', '点击翻译当前网页': 'clickToTranslatePage', '点击恢复原始网页': 'clickToRestorePage',
+    '调整面板大小': 'resizePanel', '默认选句面板大小': 'selectionPanelDefaultSize', '新网页使用此尺寸；已单独调整过的网站保持自己的尺寸': 'selectionPanelDefaultSizeHint',
+    '宽度': 'width', '高度': 'height', '默认面板宽度': 'defaultPanelWidth', '默认面板高度': 'defaultPanelHeight',
+    '保存大小': 'savePanelSize', '恢复默认': 'restoreDefault', '恢复内置默认大小（360 × 220）': 'restoreBuiltInPanelSize',
+    '默认面板大小已保存': 'selectionPanelDefaultSizeSaved', '已恢复默认面板大小': 'selectionPanelDefaultSizeRestored', '面板大小无效：宽度 240-1600 px，高度 180-1200 px': 'selectionPanelDefaultSizeInvalid',
+    '点击翻译当前网页': 'clickToTranslatePage', '点击恢复原始网页': 'clickToRestorePage',
     '保留网页段落和标题，打开双语阅读页': 'structuredReaderTitle', '请输入需要翻译的文本...': 'inputPlaceholder',
     '仅保存在本机扩展存储': 'localOnlyPlaceholder', '例如 ap-beijing': 'regionPlaceholder', '系统提示词': 'systemPrompt',
     '支持 {{to}}、{{from}}、{{origin}}': 'userPromptPlaceholder', '服务接口地址': 'serviceEndpointPlaceholder',
@@ -63,7 +67,10 @@
     '检测到页面已经是目标语言，保留原文结构': 'sameLanguageStructured', '正在准备页面翻译...': 'preparingPageTranslation',
     '检测到网页已经是目标语言，未执行翻译': 'sameLanguagePageSkipped', '未找到可翻译的正文': 'noTranslatableBody',
     '页面翻译完成': 'pageTranslationComplete', '此页面不支持翻译功能（需要 Chrome 138+ 且安全上下文）': 'translatorUnsupportedContext',
-    '正在切换翻译引擎并重新翻译...': 'switchingTranslationEngine', '正在切换目标语言...': 'switchingTargetLanguage'
+    '正在切换翻译引擎并重新翻译...': 'switchingTranslationEngine', '正在切换目标语言...': 'switchingTargetLanguage',
+    '在本页查找': 'pageSearch', '上一处': 'previousMatch', '下一处': 'nextMatch', '阅读进度': 'readingProgress',
+    '搜索原文、译文或标题': 'historySearchPlaceholder', '全部方式': 'allEngines', '合并重复': 'mergeDuplicates', '撤销': 'undo',
+    '重试翻译': 'retryTranslation', '请刷新当前页面后重试': 'refreshPageNotice', '尚未配置，请从工具栏打开 Anwara Translator → 设置': 'engineNotConfigured'
   });
 
   function message(key, fallback, substitutions) {

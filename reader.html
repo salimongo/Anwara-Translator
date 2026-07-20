@@ -16,6 +16,12 @@
           <span>双语阅读</span>
         </div>
       </div>
+      <div class="reader-search" role="search">
+        <input id="readerSearchInput" type="search" placeholder="在本页查找" aria-label="在本页查找">
+        <button id="readerSearchPrevBtn" class="icon-btn" type="button" title="上一处" aria-label="上一处">↑</button>
+        <span id="readerSearchCount" class="reader-search-count" aria-live="polite">0/0</span>
+        <button id="readerSearchNextBtn" class="icon-btn" type="button" title="下一处" aria-label="下一处">↓</button>
+      </div>
       <div class="reader-actions">
         <button id="readerBackBtn" class="icon-btn" type="button" title="返回跳转前位置" aria-label="返回跳转前位置" hidden>
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -27,6 +33,13 @@
             <path d="M5 6h14M5 12h14M5 18h14"/>
           </svg>
         </button>
+        <button id="readerTopBtn" class="icon-btn reader-top-btn" type="button" title="回到顶部" aria-label="回到顶部" disabled>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 19V5M6 11l6-6 6 6"/>
+          </svg>
+        </button>
+        <span id="readerProgress" class="reader-progress" title="阅读进度" aria-live="polite">0%</span>
+        <button id="readerReadingBtn" class="icon-text-btn reader-reading-btn" type="button" title="加入阅读区" disabled>加入阅读区</button>
         <button id="copyTranslatedBtn" class="icon-text-btn" type="button" title="复制译文">复制译文</button>
         <button id="closeReaderBtn" class="icon-btn" type="button" title="关闭阅读页" aria-label="关闭阅读页">×</button>
       </div>
