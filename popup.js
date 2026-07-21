@@ -35,10 +35,10 @@ const selectionPanelDefaultWidthInput = document.getElementById('selectionPanelD
 const selectionPanelDefaultHeightInput = document.getElementById('selectionPanelDefaultHeight');
 const selectionPanelDefaultSizeSaveBtn = document.getElementById('selectionPanelDefaultSizeSaveBtn');
 const selectionPanelDefaultSizeResetBtn = document.getElementById('selectionPanelDefaultSizeResetBtn');
-const selectionPanelSizePresetButtons = Array.from(document.querySelectorAll('.panel-size-preset'));
 const selectionPanelUseGlobalSizeToggle = document.getElementById('selectionPanelUseGlobalSizeToggle');
 const selectionPanelRememberSiteSizeToggle = document.getElementById('selectionPanelRememberSiteSizeToggle');
 const openPanelSizeTunerBtn = document.getElementById('openPanelSizeTunerBtn');
+const openFullConsoleBtn = document.getElementById('openFullConsoleBtn');
 const sameLanguageModeSelect = document.getElementById('sameLanguageModeSelect');
 const sameLanguageModeStatus = document.getElementById('sameLanguageModeStatus');
 const defaultEngineSelect = document.getElementById('defaultEngineSelect');
@@ -83,7 +83,7 @@ const MAX_SELECTION_PANEL_WIDTH = 1600;
 const MAX_SELECTION_PANEL_HEIGHT = 1200;
 const DEFAULT_SELECTION_PANEL_WIDTH = 360;
 const DEFAULT_SELECTION_PANEL_HEIGHT = 220;
-const CONTENT_SCRIPT_VERSION = '1.6.15';
+const CONTENT_SCRIPT_VERSION = '1.6.18';
 const TRANSLATION_ENGINE_KEY = 'translatorDefaultEngine';
 const TRANSLATION_SITE_ENGINES_KEY = 'translatorSiteDefaultEngines';
 const TRANSLATION_ENGINE_LOCAL = 'local';
@@ -1016,18 +1016,15 @@ function renderSelectionPanelDefaultSize(size) {
   const normalized = normalizeSelectionPanelDefaultSize(size) || builtInSelectionPanelDefaultSize();
   if (selectionPanelDefaultWidthInput) selectionPanelDefaultWidthInput.value = String(normalized.width);
   if (selectionPanelDefaultHeightInput) selectionPanelDefaultHeightInput.value = String(normalized.height);
-  selectionPanelSizePresetButtons.forEach((button) => {
-    const active = Number(button.dataset.panelWidth) === normalized.width && Number(button.dataset.panelHeight) === normalized.height;
-    button.classList.toggle('is-active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
 }
 
 async function loadSelectionPanelDefaultSize() {
   const stored = await chrome.storage.local.get([SELECTION_PANEL_DEFAULT_SIZE_KEY, SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY, SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY]);
   renderSelectionPanelDefaultSize(stored[SELECTION_PANEL_DEFAULT_SIZE_KEY]);
-  if (selectionPanelUseGlobalSizeToggle) selectionPanelUseGlobalSizeToggle.checked = stored[SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY] === true;
+  const useGlobalSize = stored[SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY] === true;
+  if (selectionPanelUseGlobalSizeToggle) selectionPanelUseGlobalSizeToggle.checked = useGlobalSize;
   if (selectionPanelRememberSiteSizeToggle) selectionPanelRememberSiteSizeToggle.checked = stored[SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY] !== false;
+  updateSelectionPanelSizeScopeUi(useGlobalSize);
 }
 
 async function saveSelectionPanelDefaultSize(sizeOverride = null) {
@@ -1055,17 +1052,122 @@ async function resetSelectionPanelDefaultSize() {
   setStatus('已恢复默认面板大小', 'ok');
 }
 
+function openConsolePanelSizeTuner() {
+  const existing = document.getElementById('consolePanelSizeTuner');
+  if (existing) return;
+
+  let size = normalizeSelectionPanelDefaultSize({
+    width: selectionPanelDefaultWidthInput?.value,
+    height: selectionPanelDefaultHeightInput?.value
+  }) || builtInSelectionPanelDefaultSize();
+  let position = { left: 24, top: 24 };
+  const overlay = document.createElement('div');
+  overlay.id = 'consolePanelSizeTuner';
+  overlay.className = 'console-size-tuner-backdrop';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', '选句翻译面板尺寸预览');
+  overlay.innerHTML = `
+    <section class="console-size-tuner">
+      <header class="console-size-tuner-header">
+        <div class="console-size-tuner-title">
+          <strong>选句翻译</strong>
+          <span class="console-size-tuner-dimensions"></span>
+        </div>
+        <button class="console-size-tuner-close" type="button" aria-label="关闭尺寸预览" title="关闭">×</button>
+      </header>
+      <div class="console-size-tuner-body">
+        <p class="console-size-tuner-source">Every small choice shapes the road ahead.</p>
+        <div class="console-size-tuner-divider"></div>
+        <p class="console-size-tuner-translation">每一个微小的选择，都会塑造前方的道路。</p>
+      </div>
+      <footer class="console-size-tuner-footer">
+        <span class="console-size-tuner-meta">本地翻译 · 英语 → 简体中文</span>
+        <span class="console-size-tuner-status small" aria-live="polite"></span>
+        <button class="btn console-size-tuner-save" type="button" title="保存为全局大小">保存</button>
+      </footer>
+      <span class="console-size-tuner-handle" aria-hidden="true"></span>
+    </section>`;
+
+  const panel = overlay.querySelector('.console-size-tuner');
+  const header = overlay.querySelector('.console-size-tuner-header');
+  const dimensions = overlay.querySelector('.console-size-tuner-dimensions');
+  const handle = overlay.querySelector('.console-size-tuner-handle');
+  const closeButton = overlay.querySelector('.console-size-tuner-close');
+  const saveButton = overlay.querySelector('.console-size-tuner-save');
+  const localStatus = overlay.querySelector('.console-size-tuner-status');
+  const clampPosition = () => {
+    position.left = Math.max(12, Math.min(position.left, Math.max(12, window.innerWidth - size.width - 12)));
+    position.top = Math.max(12, Math.min(position.top, Math.max(12, window.innerHeight - size.height - 12)));
+  };
+  const render = () => {
+    clampPosition();
+    panel.style.width = `${size.width}px`;
+    panel.style.height = `${size.height}px`;
+    panel.style.left = `${position.left}px`;
+    panel.style.top = `${position.top}px`;
+    dimensions.textContent = `${size.width} × ${size.height}`;
+  };
+  const close = () => overlay.remove();
+  const bindDrag = (trigger, onMove) => {
+    trigger.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('button')) return;
+      event.preventDefault();
+      const start = { x: event.clientX, y: event.clientY, left: position.left, top: position.top, width: size.width, height: size.height };
+      const move = (moveEvent) => onMove(start, moveEvent);
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up, { once: true });
+    });
+  };
+
+  bindDrag(header, (start, event) => {
+    position = { left: start.left + event.clientX - start.x, top: start.top + event.clientY - start.y };
+    render();
+  });
+  bindDrag(handle, (start, event) => {
+    size = {
+      width: Math.min(MAX_SELECTION_PANEL_WIDTH, Math.max(MIN_SELECTION_PANEL_WIDTH, Math.round(start.width + event.clientX - start.x))),
+      height: Math.min(MAX_SELECTION_PANEL_HEIGHT, Math.max(MIN_SELECTION_PANEL_HEIGHT, Math.round(start.height + event.clientY - start.y)))
+    };
+    render();
+  });
+  closeButton.addEventListener('click', close);
+  saveButton.addEventListener('click', async () => {
+    saveButton.disabled = true;
+    try {
+      await saveSelectionPanelDefaultSize(size);
+      localStatus.textContent = '已保存';
+    } catch (error) {
+      localStatus.textContent = '保存失败';
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+  overlay.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+  document.body.appendChild(overlay);
+  position = { left: Math.round((window.innerWidth - size.width) / 2), top: Math.round((window.innerHeight - size.height) / 2) };
+  render();
+  closeButton.focus();
+}
+
 function getSiteKeyFromUrl(url) {
   try {
     const parsed = new URL(url);
-    return parsed.origin && parsed.origin !== 'null' ? parsed.origin : parsed.href;
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return parsed.origin && parsed.origin !== 'null' ? parsed.origin : null;
   } catch {
     return null;
   }
 }
 
 async function getActiveTranslationSiteKey() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await getOperationalTab();
   return getSiteKeyFromUrl(tab?.url || '');
 }
 
@@ -1205,6 +1307,8 @@ function renderProviderOptions(selectedId = '') {
 function setProviderFieldVisible(selector, visible) {
   document.querySelectorAll(selector).forEach((element) => {
     element.style.display = visible ? '' : 'none';
+    const sensitiveShell = element.closest('.sensitive-input-shell');
+    if (sensitiveShell) sensitiveShell.style.display = visible ? '' : 'none';
   });
 }
 
@@ -1485,6 +1589,16 @@ async function loadTranslationEngineSettings() {
       : siteKey
         ? uiMessage('siteFollowsGlobalStatus', `当前网站跟随全局默认（${translationEngineStatusLabel(effectiveEngine, onlineReady, llmReady)}）`, [translationEngineStatusLabel(effectiveEngine, onlineReady, llmReady)])
         : uiMessage('siteDefaultUnsupported', '当前页面不支持网站级默认设置');
+  }
+  const siteScopedActionsAvailable = Boolean(siteKey) && !isFullConsole;
+  [setSiteEngineBtn, clearSiteEngineBtn].filter(Boolean).forEach((button) => {
+    button.disabled = !siteScopedActionsAvailable;
+    button.title = siteScopedActionsAvailable ? '' : isFullConsole
+      ? '完整控制台中不能设置当前网站默认'
+      : '仅支持 HTTP/HTTPS 网页';
+  });
+  if (isFullConsole && engineScopeStatus) {
+    engineScopeStatus.textContent = '完整控制台中不能设置当前网站默认';
   }
 }
 
@@ -1796,7 +1910,7 @@ function updateWhitelistDisplay() {
 // 添加当前网页到白名单
 async function addCurrentPageToWhitelist() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (!tab || !tab.url) {
       setStatus('无法获取当前网页信息', 'err');
       return;
@@ -2292,7 +2406,7 @@ swapBtn?.addEventListener("click", () => {
   }
 
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (tab?.id) {
       try {
         await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["contentScript.js"] });
@@ -2361,7 +2475,7 @@ selectionToggle?.addEventListener('change', async (e) => {
   const enabled = !!e.target.checked;
   const previous = !enabled;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (!tab?.id) throw new Error('没有可操作的当前标签页');
     await ensureSelectionTranslationContentScript(tab.id);
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_SELECTION_TRANSLATION', enabled });
@@ -2377,38 +2491,63 @@ selectionToggle?.addEventListener('change', async (e) => {
 });
 
 // 确保当前标签页已经有内容脚本，返回漂浮按钮状态
-async function ensureFloatingButtonContentScript(tabId) {
-  try {
-    return await chrome.tabs.sendMessage(tabId, { type: 'QUERY_FLOATING_BUTTON' });
-  } catch {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
-    return await chrome.tabs.sendMessage(tabId, { type: 'QUERY_FLOATING_BUTTON' });
-  }
+function isInjectableWebTab(tab) {
+  return /^https?:/i.test(String(tab?.url || ''));
 }
 
-// 漂浮翻译按钮开关：先确认页面可用，再持久化并通知 content script
+async function ensureFloatingButtonContentScript(tabId) {
+  let status = null;
+  try {
+    status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+  } catch {}
+  if (status?.version === CONTENT_SCRIPT_VERSION) return status;
+
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+  status = await chrome.tabs.sendMessage(tabId, { type: 'QUERY_STATUS' });
+  if (status?.version !== CONTENT_SCRIPT_VERSION) {
+    throw new Error('当前网页仍在运行旧版脚本，请刷新页面后再开启。');
+  }
+  return status;
+}
+
+// The preference is global. A local extension page cannot host the button, but
+// it must not prevent the user from enabling it for normal web pages.
 floatingToggle?.addEventListener('change', async (e) => {
   const enabled = !!e.target.checked;
   const previous = !enabled;
+  let pageUpdated = false;
+  let pageError = null;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error('没有可操作的当前标签页');
-    await ensureFloatingButtonContentScript(tab.id);
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: 'TOGGLE_FLOATING_BUTTON',
-      enabled
-    });
-    if (!response?.ok) {
-      throw new Error(response?.error || '页面没有确认漂浮按钮状态');
+    const tab = await getOperationalTab();
+    if (isInjectableWebTab(tab) && tab?.id) {
+      try {
+        await ensureFloatingButtonContentScript(tab.id);
+        const response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'TOGGLE_FLOATING_BUTTON',
+          enabled
+        });
+        if (!response?.ok) throw new Error(response?.error || '页面没有确认漂浮按钮状态');
+        pageUpdated = true;
+      } catch (error) {
+        pageError = error;
+      }
     }
+
     await chrome.storage.sync.set({ floatingButtonEnabled: enabled });
     updateToggleStatus(floatingToggle, floatingToggleStatus, enabled);
-    setStatus(enabled ? '已开启：漂浮翻译按钮' : '已关闭：漂浮翻译按钮', enabled ? 'ok' : '');
+    if (!enabled) {
+      setStatus('已关闭：漂浮翻译按钮', '');
+    } else if (pageUpdated) {
+      setStatus('已开启：漂浮翻译按钮', 'ok');
+    } else {
+      setStatus('已开启：进入或刷新普通网页后显示', 'ok');
+      if (pageError) console.warn('Floating button will appear after page refresh:', pageError);
+    }
   } catch (error) {
     e.target.checked = previous;
     updateToggleStatus(floatingToggle, floatingToggleStatus, previous);
-    setStatus('当前页面无法切换漂浮按钮：' + String(error?.message || error || ''), 'err');
-    console.warn('Failed to toggle floating button:', error);
+    setStatus('漂浮按钮设置保存失败：' + String(error?.message || error || ''), 'err');
+    console.warn('Failed to save floating button preference:', error);
   }
 });
 
@@ -2436,30 +2575,46 @@ selectionPanelDefaultSizeSaveBtn?.addEventListener('click', async () => {
     setStatus('默认面板大小保存失败：' + String(error?.message || error || ''), 'err');
   }
 });
-selectionPanelSizePresetButtons.forEach((button) => button.addEventListener('click', async () => {
-  try {
-    await saveSelectionPanelDefaultSize({ width: button.dataset.panelWidth, height: button.dataset.panelHeight });
-  } catch (error) {
-    setStatus('默认面板大小保存失败：' + String(error?.message || error || ''), 'err');
-  }
-}));
 selectionPanelRememberSiteSizeToggle?.addEventListener('change', async (event) => {
   await chrome.storage.local.set({ [SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY]: !!event.target.checked });
   setStatus(event.target.checked ? '已开启：记忆网站面板大小' : '已关闭：仅记忆网站面板位置', 'ok');
 });
+function updateSelectionPanelSizeScopeUi(useGlobalSize) {
+  if (!selectionPanelRememberSiteSizeToggle) return;
+  selectionPanelRememberSiteSizeToggle.disabled = useGlobalSize;
+  const item = selectionPanelRememberSiteSizeToggle.closest('.switch-item');
+  if (item) {
+    item.style.opacity = useGlobalSize ? '0.52' : '';
+    item.title = useGlobalSize ? '已被所有网页使用全局面板大小覆盖' : '';
+  }
+}
+
 selectionPanelUseGlobalSizeToggle?.addEventListener('change', async (event) => {
   try {
-    await chrome.storage.local.set({ [SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY]: !!event.target.checked });
-    setStatus(event.target.checked ? '已开启：所有网页使用全局面板大小' : '已关闭：沿用网站记忆的面板大小', 'ok');
+    const useGlobalSize = !!event.target.checked;
+    await chrome.storage.local.set({ [SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY]: useGlobalSize });
+    updateSelectionPanelSizeScopeUi(useGlobalSize);
+    setStatus(useGlobalSize ? '已开启：所有网页使用全局面板大小' : '已关闭：沿用网站记忆的面板大小', 'ok');
   } catch (error) {
     event.target.checked = !event.target.checked;
     setStatus('全局面板大小设置失败：' + String(error?.message || error || ''), 'err');
   }
 });
 openPanelSizeTunerBtn?.addEventListener('click', async () => {
+  if (isFullConsole) {
+    openConsolePanelSizeTuner();
+    setStatus('已打开本地尺寸预览，保存后应用到所有网页', 'ok');
+    return;
+  }
+
+  let tab = null;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error('没有可用网页');
+    tab = await getOperationalTab();
+    if (!isInjectableWebTab(tab) || !tab?.id) {
+      await openFullConsoleForSizeTuner(tab);
+      window.close();
+      return;
+    }
     let response;
     try {
       response = await chrome.tabs.sendMessage(tab.id, { type: 'OPEN_SELECTION_PANEL_SIZE_TUNER' });
@@ -2470,7 +2625,12 @@ openPanelSizeTunerBtn?.addEventListener('click', async () => {
     if (!response?.ok) throw new Error(response?.error || '无法打开调试面板');
     setStatus('已打开尺寸调试面板，拖动后在面板内保存', 'ok');
   } catch (error) {
-    setStatus('请刷新当前网页后再打开尺寸调试面板', 'err');
+    try {
+      await openFullConsoleForSizeTuner(tab);
+      window.close();
+    } catch (fallbackError) {
+      setStatus('无法打开尺寸调试面板：' + String(fallbackError?.message || fallbackError || error || ''), 'err');
+    }
   }
 });
 selectionPanelDefaultSizeResetBtn?.addEventListener('click', async () => {
@@ -2625,7 +2785,7 @@ clearSiteEngineBtn?.addEventListener('click', async () => {
 manualPageBtn?.addEventListener('click', async () => {
   try {
     await chrome.storage.sync.set({ autoTranslateTargetLang: targetSelect.value });
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (!tab?.id) return;
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["contentScript.js"] });
     await chrome.tabs.sendMessage(tab.id, { type: 'START_PAGE_TRANSLATION', targetLang: targetSelect.value });
@@ -2640,7 +2800,7 @@ structuredPageBtn?.addEventListener('click', async () => {
   if (structuredPageBtn) structuredPageBtn.disabled = true;
   try {
     await chrome.storage.sync.set({ autoTranslateTargetLang: targetSelect.value });
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (!tab?.id) return;
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['contentScript.js'] });
     const response = await chrome.tabs.sendMessage(tab.id, {
@@ -2659,7 +2819,7 @@ structuredPageBtn?.addEventListener('click', async () => {
 // 手动：恢复原状
 restorePageBtn?.addEventListener('click', async () => {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (!tab?.id) return;
     await chrome.tabs.sendMessage(tab.id, { type: 'STOP_PAGE_TRANSLATION' });
     setStatus('已恢复原状', '');
@@ -2679,7 +2839,7 @@ targetSelect?.addEventListener('change', async () => {
       return; // 自动翻译未开启，不执行翻译
     }
 
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getOperationalTab();
     if (!tab?.id) return;
 
     // 检查页面是否已经在翻译状态
@@ -2769,6 +2929,274 @@ async function updateHints() {
 sourceSelect.addEventListener("change", updateHints);
 targetSelect.addEventListener("change", updateHints);
 
+function prepareSensitiveInputPrivacy() {
+  const sensitiveInputs = [
+    providerBaseUrlInput,
+    providerApiKeyInput,
+    providerAppSecretInput,
+    llmBaseUrlInput,
+    llmApiKeyInput
+  ].filter(Boolean);
+  const hideTimers = new WeakMap();
+
+  const hide = (input, button) => {
+    window.clearTimeout(hideTimers.get(input));
+    input.type = 'password';
+    button.setAttribute('aria-pressed', 'false');
+    button.title = `临时显示${input.dataset.sensitiveLabel}`;
+    button.setAttribute('aria-label', `临时显示${input.dataset.sensitiveLabel}`);
+  };
+  const scheduleHide = (input, button) => {
+    window.clearTimeout(hideTimers.get(input));
+    hideTimers.set(input, window.setTimeout(() => hide(input, button), 8000));
+  };
+
+  sensitiveInputs.forEach((input) => {
+    if (input.closest('.sensitive-input-shell')) return;
+    const label = input.labels?.[0]?.textContent?.trim() || '敏感内容';
+    const restoreType = input.type === 'password' ? 'text' : input.type;
+    const shell = document.createElement('span');
+    shell.className = 'sensitive-input-shell';
+    input.dataset.sensitiveLabel = label;
+    input.dataset.sensitiveRestoreType = restoreType;
+    input.before(shell);
+    shell.appendChild(input);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sensitive-input-toggle';
+    button.setAttribute('aria-pressed', 'false');
+    button.title = `临时显示${label}`;
+    button.setAttribute('aria-label', `临时显示${label}`);
+    button.innerHTML = `
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path>
+        <circle cx="12" cy="12" r="2.5"></circle>
+      </svg>`;
+    shell.appendChild(button);
+
+    button.addEventListener('click', () => {
+      const isHidden = input.type === 'password';
+      if (!isHidden) {
+        hide(input, button);
+        return;
+      }
+      input.type = input.dataset.sensitiveRestoreType || 'text';
+      button.setAttribute('aria-pressed', 'true');
+      button.title = `${label}将在 8 秒后重新遮蔽`;
+      button.setAttribute('aria-label', `${label}将在 8 秒后重新遮蔽`);
+      scheduleHide(input, button);
+    });
+    input.addEventListener('blur', () => window.setTimeout(() => {
+      if (!shell.contains(document.activeElement)) hide(input, button);
+    }, 120));
+    input.addEventListener('input', () => {
+      if (input.type !== 'password') scheduleHide(input, button);
+    });
+    input.type = 'password';
+  });
+}
+
+prepareSensitiveInputPrivacy();
+
+const fullConsoleParams = new URLSearchParams(location.search);
+const isFullConsole = fullConsoleParams.get('mode') === 'full';
+const fullConsoleSourceTabId = Number(fullConsoleParams.get('sourceTabId'));
+const fullConsoleInitialTab = fullConsoleParams.get('tab');
+const fullConsoleOpenPanelSizeTuner = fullConsoleParams.get('sizeTuner') === '1';
+const fullConsoleTabTitles = Object.freeze({
+  translation: '翻译',
+  archive: '历史与阅读',
+  settings: '设置',
+});
+const fullConsoleRequestedTab = Object.hasOwn(fullConsoleTabTitles, fullConsoleInitialTab)
+  ? fullConsoleInitialTab
+  : 'translation';
+
+function prepareFullConsoleSettingsGroups(workspace) {
+  const settingsSection = workspace.querySelector('.switches-section[data-console-section="settings"]');
+  if (!settingsSection || settingsSection.dataset.fullConsoleGrouped === 'true') return;
+
+  const controls = Array.from(settingsSection.children)
+    .find((child) => child.querySelector?.('#autoToggle'));
+  if (!controls) return;
+
+  const items = Array.from(controls.children);
+  const supplementalSections = Array.from(workspace.children)
+    .filter((child) => child !== settingsSection && child.dataset?.consoleSection === 'settings');
+  const whitelistSection = supplementalSections.find((section) => section.querySelector?.('#whitelistContainer'));
+  const supportSections = supplementalSections.filter((section) => (
+    section.querySelector?.('#feedbackBtn') || section.querySelector?.('#emailFeedbackBtn')
+  ));
+
+  const groups = [
+    { id: 'behavior', label: '网页行为', items: items.slice(0, 3) },
+    { id: 'panel', label: '选句面板', items: items.slice(3, 8) },
+    { id: 'rules', label: '翻译规则', items: items.slice(8, 10) },
+    { id: 'services', label: '服务配置', items: items.slice(10) },
+    { id: 'site-rules', label: '网站规则', items: whitelistSection ? [whitelistSection] : [] },
+    { id: 'support', label: '项目与支持', items: supportSections },
+  ].filter((group) => group.items.length > 0);
+  if (groups.length === 0) return;
+
+  const title = Array.from(settingsSection.children)
+    .find((child) => child.classList?.contains('section-title'));
+  title?.remove();
+
+  const nav = document.createElement('nav');
+  nav.className = 'settings-subnav';
+  nav.dataset.consoleSection = 'settings';
+  nav.setAttribute('aria-label', '设置分区');
+  const groupButtons = [];
+  const activateGroup = (activeButton) => {
+    groupButtons.forEach((button) => {
+      const isActive = button === activeButton;
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-current', isActive ? 'true' : 'false');
+    });
+  };
+  const highlightArrival = (section) => {
+    section.classList.remove('is-navigation-target');
+    void section.offsetWidth;
+    section.classList.add('is-navigation-target');
+    section.addEventListener('animationend', () => section.classList.remove('is-navigation-target'), { once: true });
+  };
+
+  const fragments = groups.map((group) => {
+    const section = document.createElement('section');
+    section.className = 'settings-section-group';
+    section.id = `fullSettingsGroup-${group.id}`;
+    const heading = document.createElement('h2');
+    heading.className = 'settings-section-heading';
+    heading.textContent = group.label;
+    const body = document.createElement('div');
+    body.className = 'settings-group-body';
+    group.items.forEach((item) => body.appendChild(item));
+    section.append(heading, body);
+
+    const button = document.createElement('button');
+    button.className = 'settings-subnav-button';
+    button.type = 'button';
+    button.textContent = group.label;
+    button.addEventListener('click', () => {
+      activateGroup(button);
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.setTimeout(() => highlightArrival(section), 260);
+    });
+    nav.appendChild(button);
+    groupButtons.push(button);
+    return section;
+  });
+
+  controls.remove();
+  settingsSection.replaceChildren(...fragments);
+  workspace.insertBefore(nav, settingsSection);
+  settingsSection.dataset.fullConsoleGrouped = 'true';
+  if (groupButtons[0]) activateGroup(groupButtons[0]);
+}
+
+function prepareFullConsoleProviderProfileLayout(workspace) {
+  const grid = workspace.querySelector('#providerProfileDetails .provider-profile-grid');
+  const profileLabel = grid?.querySelector('.provider-profile-section-label');
+  const profileManager = grid?.querySelector('.provider-profile-manager');
+  if (!grid || !profileLabel || !profileManager || grid.dataset.fullConsoleSplit === 'true') return;
+
+  const editor = document.createElement('div');
+  editor.className = 'provider-profile-editor';
+  const library = document.createElement('aside');
+  library.className = 'provider-profile-library';
+  library.setAttribute('aria-label', '服务配置档案');
+
+  for (const child of Array.from(grid.children)) {
+    if (child === profileLabel || child === profileManager) {
+      library.appendChild(child);
+    } else {
+      editor.appendChild(child);
+    }
+  }
+
+  grid.replaceChildren(editor, library);
+  grid.classList.add('provider-profile-split');
+  grid.dataset.fullConsoleSplit = 'true';
+}
+
+function prepareFullConsoleProjectLink(tabs, workspace) {
+  if (!tabs || tabs.querySelector('.console-sidebar-footer')) return;
+
+  const sourceLink = workspace.querySelector('a[href="https://github.com/salimongo/Anwara-Translator"]');
+  const sourceSection = sourceLink?.closest('[data-console-section="settings"]');
+  if (!sourceLink || !sourceSection) return;
+
+  const footer = document.createElement('div');
+  footer.className = 'console-sidebar-footer';
+  const projectLink = document.createElement('a');
+  projectLink.className = 'console-project-link';
+  projectLink.href = sourceLink.href;
+  projectLink.target = sourceLink.target || '_blank';
+  projectLink.rel = sourceLink.rel || 'noopener noreferrer';
+  projectLink.title = '打开 Anwara Translator 项目仓库';
+  projectLink.innerHTML = `
+    <span>项目仓库</span>
+    <svg class="console-project-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M14 3h7v7"></path>
+      <path d="M10 14 21 3"></path>
+      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
+    </svg>`;
+  footer.appendChild(projectLink);
+  tabs.appendChild(footer);
+  sourceSection.dataset.fullConsoleProjectLink = 'true';
+}
+
+function prepareFullConsoleLayout() {
+  const card = document.querySelector('.card');
+  const header = card?.querySelector('.console-header');
+  const tabs = card?.querySelector('.console-tabs');
+  if (!card || !header || !tabs || Array.from(card.children).some((child) => child.classList?.contains('console-workspace'))) return;
+
+  const workspace = document.createElement('main');
+  workspace.className = 'console-workspace';
+  const workspaceHeading = document.createElement('header');
+  workspaceHeading.className = 'console-workspace-heading';
+  const workspaceTitle = document.createElement('h1');
+  workspaceTitle.id = 'consoleWorkspaceTitle';
+  workspaceTitle.textContent = fullConsoleTabTitles[fullConsoleRequestedTab];
+  workspaceHeading.appendChild(workspaceTitle);
+  workspace.appendChild(workspaceHeading);
+  for (const child of Array.from(card.children)) {
+    if (child !== header && child !== tabs) workspace.appendChild(child);
+  }
+  prepareFullConsoleSettingsGroups(workspace);
+  prepareFullConsoleProviderProfileLayout(workspace);
+  prepareFullConsoleProjectLink(tabs, workspace);
+  card.appendChild(workspace);
+}
+
+function updateFullConsoleTitle(tabName) {
+  if (!isFullConsole) return;
+  const title = document.getElementById('consoleWorkspaceTitle');
+  if (title) title.textContent = fullConsoleTabTitles[tabName] || fullConsoleTabTitles.translation;
+}
+
+if (isFullConsole) {
+  document.documentElement.classList.add('full-console');
+  document.body.classList.add('full-console');
+  document.body.dataset.activeTab = fullConsoleRequestedTab;
+  prepareFullConsoleLayout();
+}
+
+async function getOperationalTab() {
+  if (Number.isInteger(fullConsoleSourceTabId) && fullConsoleSourceTabId >= 0) {
+    try {
+      const sourceTab = await chrome.tabs.get(fullConsoleSourceTabId);
+      if (typeof sourceTab?.id === 'number') return sourceTab;
+    } catch {
+      // The source tab was closed. Fall back to the active tab for popup mode.
+    }
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
 const CONSOLE_TAB_KEY = 'translatorConsoleTab';
 const consoleTabs = Array.from(document.querySelectorAll('.console-tab'));
 function setConsoleTab(tabName, persist = true) {
@@ -2776,6 +3204,7 @@ function setConsoleTab(tabName, persist = true) {
     ? tabName
     : 'translation';
   document.body.dataset.activeTab = activeTab;
+  updateFullConsoleTitle(activeTab);
   consoleTabs.forEach((tab) => {
     const isActive = tab.dataset.tab === activeTab;
     tab.classList.toggle('is-active', isActive);
@@ -2784,6 +3213,13 @@ function setConsoleTab(tabName, persist = true) {
   if (activeTab === 'archive') {
     void loadHistoryState();
   }
+  if (isFullConsole) {
+    const url = new URL(location.href);
+    if (url.searchParams.get('tab') !== activeTab) {
+      url.searchParams.set('tab', activeTab);
+      history.replaceState(null, '', url);
+    }
+  }
   if (persist) {
     chrome.storage.local.set({ [CONSOLE_TAB_KEY]: activeTab }).catch(() => {});
   }
@@ -2791,18 +3227,84 @@ function setConsoleTab(tabName, persist = true) {
 consoleTabs.forEach((tab) => {
   tab.addEventListener('click', () => setConsoleTab(tab.dataset.tab));
 });
+function createFullConsoleUrl({ tabName = 'translation', sourceTab = null, sizeTuner = false } = {}) {
+  const url = new URL(chrome.runtime.getURL('popup.html'));
+  url.searchParams.set('mode', 'full');
+  url.searchParams.set('tab', tabName);
+  if (typeof sourceTab?.id === 'number') url.searchParams.set('sourceTabId', String(sourceTab.id));
+  if (sizeTuner) url.searchParams.set('sizeTuner', '1');
+  return url;
+}
+
+async function openOrFocusFullConsole(options = {}) {
+  const url = createFullConsoleUrl(options);
+  const fullConsolePrefix = `${chrome.runtime.getURL('popup.html')}?mode=full`;
+  let existing = null;
+  try {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    existing = tabs.find((tab) => typeof tab?.url === 'string' && tab.url.startsWith(fullConsolePrefix)) || null;
+  } catch {
+    // Creating a new extension tab remains a valid fallback when tab enumeration is unavailable.
+  }
+  if (typeof existing?.id === 'number') {
+    try {
+      await chrome.tabs.update(existing.id, { active: true, url: url.toString() });
+      return;
+    } catch {
+      // The tab may have closed between query and update; create a fresh console below.
+    }
+  }
+  await chrome.tabs.create({ url: url.toString() });
+}
+
+async function openFullConsoleForSizeTuner(sourceTab = null) {
+  await openOrFocusFullConsole({ tabName: 'settings', sourceTab, sizeTuner: true });
+}
+
+openFullConsoleBtn?.addEventListener('click', async () => {
+  let sourceTab = null;
+  try {
+    sourceTab = await getOperationalTab();
+  } catch {
+    // The full console can open without a source tab.
+  }
+  try {
+    await openOrFocusFullConsole({
+      tabName: document.body.dataset.activeTab || 'translation',
+      sourceTab
+    });
+    window.close();
+  } catch (error) {
+    setStatus('无法打开完整控制台：' + String(error?.message || error || ''), 'err');
+  }
+});
 void (async () => {
   try {
+    if (isFullConsole && fullConsoleOpenPanelSizeTuner) {
+      setConsoleTab('settings', false);
+      requestAnimationFrame(() => {
+        openConsolePanelSizeTuner();
+        setStatus('已打开本地尺寸预览，保存后应用到所有网页', 'ok');
+      });
+      return;
+    }
     const result = await chrome.storage.local.get([CONSOLE_TAB_KEY]);
-    const requestedTab = ['translation', 'settings', 'archive'].includes(result[CONSOLE_TAB_KEY])
-      ? result[CONSOLE_TAB_KEY]
-      : 'translation';
+    const requestedTab = ['translation', 'settings', 'archive'].includes(fullConsoleInitialTab)
+      ? fullConsoleInitialTab
+      : ['translation', 'settings', 'archive'].includes(result[CONSOLE_TAB_KEY])
+        ? result[CONSOLE_TAB_KEY]
+        : 'translation';
     if (requestedTab !== 'archive') {
       setConsoleTab(requestedTab, false);
       return;
     }
 
-    // Keep the popup usable while an empty or damaged archive is being recovered.
+    if (isFullConsole) {
+      setConsoleTab('archive', false);
+      return;
+    }
+
+    // Keep the small popup usable while an empty or damaged archive is being recovered.
     setConsoleTab('translation', false);
     await loadHistoryState();
     if (historyItems.length || readingItems.length) setConsoleTab('archive', false);

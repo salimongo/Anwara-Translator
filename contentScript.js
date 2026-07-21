@@ -1,7 +1,7 @@
 // contentScript.js - Translate page text in-place using Chrome Translator API, preserving layout
 
 (() => {
-  const CONTENT_SCRIPT_VERSION = '1.6.15';
+  const CONTENT_SCRIPT_VERSION = '1.6.18';
   // Existing pages keep their old listeners. Tell the user the safe refresh boundary.
   if (window.translatorContentScriptLoaded) {
     if (window.translatorContentScriptVersion !== CONTENT_SCRIPT_VERSION && !document.getElementById('anwara-translator-refresh-notice')) {
@@ -726,6 +726,7 @@
     tooltip._retranslateMenu = retranslateMenu;
     tooltip._closeButton = closeButton;
     tooltip._actionBar = actionBar;
+    tooltip._footerBar = footerBar;
     tooltip._sourceMeta = sourceMeta;
     tooltip._resizeHandle = resizeHandle;
     tooltip.addEventListener('mouseenter', cancelSelectionPanelHide);
@@ -897,6 +898,7 @@
     if (!panel.isSizeTuner) selectionPanelSize = { ...panel.size };
     tooltip.style.width = `${panel.size.width}px`;
     tooltip.style.height = `${panel.size.height}px`;
+    updateSizeTunerPreview(panel);
     event.preventDefault();
   }
 
@@ -1528,27 +1530,47 @@
     return createTranslationPanel(text, anchor, options);
   }
 
+  function updateSizeTunerPreview(panel) {
+    const label = panel?.tooltip?._sizeTunerPreviewLabel;
+    if (!label || !panel.size) return;
+    label.textContent = `${Math.round(panel.size.width)} × ${Math.round(panel.size.height)} px`;
+  }
+
   function openSelectionPanelSizeTuner() {
     const existing = [...translationPanels.values()].find((panel) => panel.isSizeTuner);
     if (existing?.tooltip?.isConnected) {
       existing.tooltip.style.display = 'block';
-      applySelectionPanelPosition(existing.tooltip);
+      // Preserve the user's in-progress dimensions when the popup asks to reveal it again.
+      applySelectionPanelPosition(existing.tooltip, { applySize: false });
+      updateSizeTunerPreview(existing);
       return existing;
     }
     const panel = createTranslationPanel('这是调试译文。拖动右下角调整大小，满意后再保存。', null, {
       sourceText: 'This is a size tuning panel. It does not translate or enter history.',
       sourceLang: 'en',
       targetLang: 'zh-Hans',
-      showBilingual: true,
+      showBilingual: false,
       showSource: false,
       openImmediately: true
     });
     panel.isSizeTuner = true;
     panel.pinned = true;
     const { tooltip } = panel;
+    tooltip._textContainer.textContent = '';
+    tooltip._textContainer.style.cssText = 'position:absolute;top:42px;left:12px;right:12px;bottom:50px;display:block;overflow:hidden;';
+    tooltip._footerBar.style.cssText += 'position:absolute;left:12px;right:12px;bottom:10px;margin:0;box-sizing:border-box;';
+    const previewSurface = document.createElement('div');
+    previewSurface.style.cssText = 'display:flex;width:100%;height:100%;box-sizing:border-box;align-items:center;justify-content:center;border:1px dashed rgba(147,197,253,.32);border-radius:4px;background:repeating-linear-gradient(0deg,transparent 0 18px,rgba(147,197,253,.06) 18px 19px),repeating-linear-gradient(90deg,transparent 0 18px,rgba(147,197,253,.06) 18px 19px);';
+    const previewLabel = document.createElement('span');
+    previewLabel.style.cssText = 'padding:4px 7px;border-radius:3px;background:rgba(15,23,42,.72);color:#bfdbfe;font-size:11px;font-variant-numeric:tabular-nums;';
+    previewSurface.appendChild(previewLabel);
+    tooltip._textContainer.appendChild(previewSurface);
+    tooltip._sizeTunerPreviewLabel = previewLabel;
     tooltip._copyButton.style.display = 'none';
     tooltip._readingButton.style.display = 'none';
     tooltip._pinButton.style.display = 'none';
+    tooltip._retranslateButton.style.display = 'none';
+    tooltip._retranslateMenu.style.display = 'none';
     const saveButton = document.createElement('button');
     saveButton.type = 'button';
     saveButton.textContent = '保存为全局大小';
@@ -1562,6 +1584,7 @@
       setTimeout(() => { if (saveButton.isConnected) saveButton.textContent = '保存为全局大小'; }, 1200);
     });
     tooltip._actionBar.insertBefore(saveButton, tooltip._closeButton);
+    updateSizeTunerPreview(panel);
     return panel;
   }
 

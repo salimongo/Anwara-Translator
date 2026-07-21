@@ -6,12 +6,14 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 
 ### Added
 
+- A full-console route: the popup opens the same control surface as a top application bar, left-navigation, right-workspace extension tab while preserving the initiating webpage as its operational target. Repeated opens focus the existing full-console tab instead of creating duplicates.
 - A global default size for selection-translation panels, a disposable in-page size-tuning panel, and separate controls for remembering each site's size versus forcing the global size on every website.
 - Each online or LLM provider now owns an independent configuration-profile list. Profiles can be created, copied, edited, deleted, and explicitly selected as the active profile for that provider.
 - The service-profile list uses a radio selection for the profile that actual translation requests use, separate from the profile currently being edited.
 
 ### Changed
 
+- Selection-panel sizing now uses the in-page tuner as the primary path: the old compact, standard, and spacious presets were removed. Enabling the global-size override disables the site-size-memory switch without changing its saved value; the disposable tuner exposes only resize, save-as-global-size, and close controls. Reopening that tuner preserves its in-progress geometry; its size-preview surface now fills the entire body while the save/close footer stays pinned to the bottom.
 - Provider profile configuration and secrets remain split into separate extension-local storage records for every profile, rather than only once per provider.
 - Provider-backed page translation, selection history, structured-reader records, reader retranslation variants, and translation cache keys now include the active provider-profile key. Switching to another profile for the same provider no longer reuses the prior profile's cached result.
 - Content-script revision 1.6.15 asks already-open pages to refresh before using profile-aware selection logic and fixes the retranslation menu so it starts closed and explicitly toggles its display state. The selection panel provides a popup menu for local, online, or LLM retranslation; retranslation reads the current target-language setting instead of reusing the old result's target language, and its result opens directly rather than collapsing to the red indicator. Cache evidence remains in an aligned panel footer with a separated action area.
