@@ -446,6 +446,17 @@ function returnToReaderPosition() {
   updateReaderBackButton();
 }
 
+function jumpToCurrentReaderTarget(target) {
+  if (!target) return false;
+  rememberReaderPosition();
+  closeLinkChoice();
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('reader-link-target-highlight');
+  window.setTimeout(() => target.classList.remove('reader-link-target-highlight'), 1200);
+  setStatus('已跳转到当前阅读页对应位置。', 'ok');
+  return true;
+}
+
 function showLinkChoice(anchor, href, link) {
   closeLinkChoice();
   const currentTarget = getCurrentPageTarget(anchor, link);
@@ -466,13 +477,7 @@ function showLinkChoice(anchor, href, link) {
   currentButton.disabled = !currentTarget;
   currentButton.title = currentTarget ? '跳转到当前阅读页对应位置' : '当前阅读页没有找到对应位置';
   currentButton.addEventListener('click', () => {
-    if (!currentTarget) return;
-    rememberReaderPosition();
-    closeLinkChoice();
-    currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    currentTarget.classList.add('reader-link-target-highlight');
-    window.setTimeout(() => currentTarget.classList.remove('reader-link-target-highlight'), 1200);
-    setStatus('已跳转到当前阅读页对应位置。', 'ok');
+    jumpToCurrentReaderTarget(currentTarget);
   });
   panel.appendChild(currentButton);
 
@@ -539,8 +544,9 @@ function appendLinkedText(parent, value, links = []) {
     if (index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, index)));
     const anchor = document.createElement('a');
     anchor.href = resolvedHref;
-    anchor.target = '_blank';
-    anchor.rel = 'noopener noreferrer';
+    const isInternalAnchor = Boolean(link?.targetAnchorId) && href.startsWith('#');
+    anchor.target = isInternalAnchor ? '' : '_blank';
+    anchor.rel = isInternalAnchor ? '' : 'noopener noreferrer';
     anchor.textContent = label;
     const citationKey = normalizeCitationKey(link?.citationKey || label);
     if (link?.referenceId) anchor.dataset.referenceId = link.referenceId;
@@ -550,11 +556,16 @@ function appendLinkedText(parent, value, links = []) {
       const targetId = citationTargetId(citationKey);
       anchor.title = `当前阅读页引用 ${citationKey}；点击选择去向`;
     } else {
-      anchor.title = '点击选择打开方式';
+      anchor.title = isInternalAnchor ? '跳转到当前阅读页对应位置' : '点击选择打开方式';
     }
     anchor.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (isInternalAnchor) {
+        const target = getCurrentPageTarget(anchor, link);
+        if (!jumpToCurrentReaderTarget(target)) setStatus('当前阅读页没有找到对应位置。', 'note');
+        return;
+      }
       showLinkChoice(anchor, resolvedHref, link);
     });
     parent.appendChild(anchor);

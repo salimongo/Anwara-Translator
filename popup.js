@@ -1067,13 +1067,36 @@ function normalizeImportedMarkdownText(value) {
     .trim();
 }
 
+function normalizeImportedMarkdownAnchorId(value) {
+  let decoded = String(value ?? '').trim().replace(/^#/, '');
+  try { decoded = decodeURIComponent(decoded); } catch {}
+  return normalizeImportedMarkdownText(decoded)
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^\p{L}\p{N}-]+/gu, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function makeImportedMarkdownHeadingAnchorId(value, used) {
+  const base = normalizeImportedMarkdownAnchorId(value) || 'section';
+  const count = used.get(base) || 0;
+  used.set(base, count + 1);
+  return count ? `${base}-${count + 1}` : base;
+}
+
 function parseImportedMarkdownInline(value) {
   const links = [];
   const prepared = String(value ?? '').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
   const sourceText = prepared.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
     const text = normalizeImportedMarkdownText(label);
     const safeHref = String(href || '').trim().replace(/^<|>$/g, '');
-    if (text && /^(?:https?:|mailto:)/i.test(safeHref)) links.push({ text, href: safeHref });
+    if (text && /^(?:https?:|mailto:)/i.test(safeHref)) {
+      links.push({ text, href: safeHref });
+    } else if (text && safeHref.startsWith('#')) {
+      const targetAnchorId = normalizeImportedMarkdownAnchorId(safeHref);
+      if (targetAnchorId) links.push({ text, href: safeHref, targetAnchorId });
+    }
     return text;
   });
   const normalized = normalizeImportedMarkdownText(sourceText);
@@ -1096,6 +1119,7 @@ function isImportedMarkdownTableDivider(line) {
 function parseImportedMarkdownBlocks(text) {
   const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
   const blocks = [];
+  const usedHeadingAnchors = new Map();
   const flushParagraph = (paragraph) => {
     const inline = parseImportedMarkdownInline(paragraph.join('\n'));
     if (inline.sourceText) blocks.push(inline.links ? { type: 'paragraph', sourceText: inline.sourceText, translatedText: '', links: inline.links } : { type: 'paragraph', sourceText: inline.sourceText, translatedText: '' });
@@ -1109,7 +1133,12 @@ function parseImportedMarkdownBlocks(text) {
     const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
       const inline = parseImportedMarkdownInline(heading[2]);
-      if (inline.sourceText) blocks.push(inline.links ? { type: 'heading', level: heading[1].length, sourceText: inline.sourceText, translatedText: '', links: inline.links } : { type: 'heading', level: heading[1].length, sourceText: inline.sourceText, translatedText: '' });
+      if (inline.sourceText) {
+        const sourceAnchorId = makeImportedMarkdownHeadingAnchorId(inline.sourceText, usedHeadingAnchors);
+        blocks.push(inline.links
+          ? { type: 'heading', level: heading[1].length, sourceText: inline.sourceText, translatedText: '', links: inline.links, sourceAnchorId }
+          : { type: 'heading', level: heading[1].length, sourceText: inline.sourceText, translatedText: '', sourceAnchorId });
+      }
       index += 1;
       continue;
     }
