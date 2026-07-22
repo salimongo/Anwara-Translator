@@ -5,7 +5,7 @@
     '翻译': 'tabTranslation', '历史 / 阅读区': 'tabArchive', '设置': 'tabSettings',
     '翻译当前网页': 'translateCurrentPage', '结构化阅读': 'structuredReader', '恢复原状': 'restorePage',
     '来源语言': 'sourceLanguage', '目标语言': 'targetLanguage', '交换来源与目标语言': 'swapLanguages',
-    '输入文本': 'inputText', '导入 TXT / Markdown': 'importDocument', '清空输入': 'clearInput', '开始翻译': 'startTranslation',
+    '输入文本': 'inputText', '导入 TXT / Markdown': 'importDocument', 'Markdown 结构化阅读': 'openMarkdownReader', '清空输入': 'clearInput', '开始翻译': 'startTranslation',
     '模型下载进度': 'modelDownloadProgress', '翻译结果': 'translationResult', '朗读': 'speak', '复制': 'copy', '翻译结果将显示在这里...': 'outputPlaceholder',
     '历史翻译与阅读区': 'archiveTitle', '历史记录与阅读区分开管理': 'archiveDescription',
     '历史翻译': 'history', '阅读区': 'readingArea', '刷新': 'refresh', '管理': 'manage', '收起': 'collapse',

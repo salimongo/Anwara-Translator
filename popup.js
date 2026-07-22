@@ -16,9 +16,12 @@ const outputEl = document.getElementById("output");
 const charCountEl = document.getElementById("charCount");
 const importTextBtn = document.getElementById('importTextBtn');
 const importTextFileInput = document.getElementById('importTextFileInput');
+const openImportedReaderBtn = document.getElementById('openImportedReaderBtn');
 const clearInputBtn = document.getElementById('clearInputBtn');
 const MAX_IMPORTED_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORTED_TEXT_CHARS = 250000;
+let importedMarkdownDocument = null;
+let isApplyingImportedText = false;
 
 const statusEl = document.getElementById("status");
 const translateBtn = document.getElementById("translateBtn");
@@ -88,7 +91,7 @@ const MAX_SELECTION_PANEL_WIDTH = 1600;
 const MAX_SELECTION_PANEL_HEIGHT = 1200;
 const DEFAULT_SELECTION_PANEL_WIDTH = 360;
 const DEFAULT_SELECTION_PANEL_HEIGHT = 220;
-const CONTENT_SCRIPT_VERSION = '1.6.21';
+const CONTENT_SCRIPT_VERSION = '1.6.22';
 const TRANSLATION_ENGINE_KEY = 'translatorDefaultEngine';
 const TRANSLATION_SITE_ENGINES_KEY = 'translatorSiteDefaultEngines';
 const TRANSLATION_ENGINE_LOCAL = 'local';
@@ -1011,7 +1014,216 @@ function updateCharCount() {
   if (clearInputBtn) clearInputBtn.disabled = len === 0;
 }
 
-inputEl.addEventListener("input", updateCharCount);
+function isImportedMarkdownFile(file) {
+  return /\.(?:md|markdown)$/i.test(String(file?.name || '')) || /^text\/markdown$/i.test(String(file?.type || ''));
+}
+
+function normalizeImportedMarkdownText(value) {
+  return String(value ?? '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/~~(.*?)~~/g, '$1')
+    .trim();
+}
+
+function parseImportedMarkdownInline(value) {
+  const links = [];
+  const prepared = String(value ?? '').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
+  const sourceText = prepared.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => {
+    const text = normalizeImportedMarkdownText(label);
+    const safeHref = String(href || '').trim().replace(/^<|>$/g, '');
+    if (text && /^(?:https?:|mailto:)/i.test(safeHref)) links.push({ text, href: safeHref });
+    return text;
+  });
+  const normalized = normalizeImportedMarkdownText(sourceText);
+  return links.length ? { sourceText: normalized, links } : { sourceText: normalized };
+}
+
+function parseImportedMarkdownTableRow(line) {
+  const trimmed = String(line || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split('|').map((cell) => {
+    const inline = parseImportedMarkdownInline(cell);
+    return inline.links ? { sourceText: inline.sourceText, translatedText: '', links: inline.links } : { sourceText: inline.sourceText, translatedText: '' };
+  });
+}
+
+function isImportedMarkdownTableDivider(line) {
+  const cells = parseImportedMarkdownTableRow(line);
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.sourceText));
+}
+
+function parseImportedMarkdownBlocks(text) {
+  const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  const blocks = [];
+  const flushParagraph = (paragraph) => {
+    const inline = parseImportedMarkdownInline(paragraph.join('\n'));
+    if (inline.sourceText) blocks.push(inline.links ? { type: 'paragraph', sourceText: inline.sourceText, translatedText: '', links: inline.links } : { type: 'paragraph', sourceText: inline.sourceText, translatedText: '' });
+  };
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) { index += 1; continue; }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const inline = parseImportedMarkdownInline(heading[2]);
+      if (inline.sourceText) blocks.push(inline.links ? { type: 'heading', level: heading[1].length, sourceText: inline.sourceText, translatedText: '', links: inline.links } : { type: 'heading', level: heading[1].length, sourceText: inline.sourceText, translatedText: '' });
+      index += 1;
+      continue;
+    }
+
+    const fence = trimmed.match(/^(```+|~~~+)/);
+    if (fence) {
+      const marker = fence[1];
+      const code = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith(marker)) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push({ type: 'code', sourceText: code.join('\n'), translatedText: code.join('\n') });
+      continue;
+    }
+
+    if (trimmed.startsWith('>')) {
+      const quote = [];
+      while (index < lines.length && lines[index].trim().startsWith('>')) {
+        quote.push(lines[index].trim().replace(/^>\s?/, ''));
+        index += 1;
+      }
+      const inline = parseImportedMarkdownInline(quote.join('\n'));
+      if (inline.sourceText) blocks.push(inline.links ? { type: 'quote', sourceText: inline.sourceText, translatedText: '', links: inline.links } : { type: 'quote', sourceText: inline.sourceText, translatedText: '' });
+      continue;
+    }
+
+    const tableHeader = parseImportedMarkdownTableRow(line);
+    if (tableHeader.length >= 2 && index + 1 < lines.length && isImportedMarkdownTableDivider(lines[index + 1])) {
+      const tableRows = [tableHeader];
+      index += 2;
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+        const cells = parseImportedMarkdownTableRow(lines[index]);
+        if (cells.length < 2) break;
+        tableRows.push(cells);
+        index += 1;
+      }
+      blocks.push({ type: 'table', rows: tableRows });
+      continue;
+    }
+
+    const list = trimmed.match(/^(?:(\d+)[.)]|[-+*])\s+(.+)$/);
+    if (list) {
+      const ordered = Boolean(list[1]);
+      const items = [];
+      while (index < lines.length) {
+        const candidate = lines[index].trim();
+        const match = candidate.match(/^(?:(\d+)[.)]|[-+*])\s+(.+)$/);
+        if (!match || Boolean(match[1]) !== ordered) break;
+        const inline = parseImportedMarkdownInline(match[2]);
+        if (inline.sourceText) items.push(inline.links ? { sourceText: inline.sourceText, translatedText: '', links: inline.links } : { sourceText: inline.sourceText, translatedText: '' });
+        index += 1;
+      }
+      if (items.length) blocks.push({ type: 'list', ordered, items });
+      continue;
+    }
+
+    const paragraph = [];
+    while (index < lines.length && lines[index].trim()) {
+      const candidate = lines[index].trim();
+      if (paragraph.length && (/^(#{1,6})\s+/.test(candidate) || /^(```+|~~~+)/.test(candidate) || candidate.startsWith('>') || /^(?:(\d+)[.)]|[-+*])\s+/.test(candidate))) break;
+      paragraph.push(lines[index]);
+      index += 1;
+    }
+    flushParagraph(paragraph);
+  }
+
+  return blocks;
+}
+
+function cloneImportedMarkdownBlocks(blocks) {
+  return (blocks || []).map((block) => {
+    if (block.type === 'list') return { ...block, items: (block.items || []).map((item) => ({ ...item })) };
+    if (block.type === 'table') return { ...block, rows: (block.rows || []).map((row) => row.map((cell) => ({ ...cell }))) };
+    return { ...block };
+  });
+}
+
+function setImportedMarkdownDocument(document) {
+  importedMarkdownDocument = document;
+  if (openImportedReaderBtn) openImportedReaderBtn.disabled = !document;
+}
+
+async function openImportedMarkdownReader() {
+  const document = importedMarkdownDocument;
+  if (!document?.blocks?.length) return;
+
+  const { hasTranslator, hasDetector } = featureDetect();
+  const engineSettings = await chrome.storage.local.get([TRANSLATION_ENGINE_KEY, ONLINE_PROVIDER_KEY, LLM_PROVIDER_KEY]);
+  const selectedEngine = ['local', 'online', 'llm'].includes(engineSettings[TRANSLATION_ENGINE_KEY])
+    ? engineSettings[TRANSLATION_ENGINE_KEY]
+    : (defaultEngineSelect?.value || TRANSLATION_ENGINE_LOCAL);
+  if (selectedEngine === TRANSLATION_ENGINE_LOCAL && !hasTranslator) {
+    setStatus('当前浏览器不支持 Translator API（需要 Chrome 138+ 且安全上下文）。', 'err');
+    return;
+  }
+
+  let sourceLanguage = sourceSelect.value;
+  if (sourceLanguage === 'auto') {
+    sourceLanguage = await detectLanguageIfNeeded(document.text, hasDetector);
+    if (!sourceLanguage) {
+      setStatus('无法可靠识别来源语言，请在顶部手动选择后重试。', 'err');
+      return;
+    }
+  }
+
+  const targetLanguage = targetSelect.value;
+  const providerId = selectedEngine === 'online'
+    ? (engineSettings[ONLINE_PROVIDER_KEY] || 'google')
+    : selectedEngine === 'llm'
+      ? (engineSettings[LLM_PROVIDER_KEY] || 'openai')
+      : 'browser-translator';
+  const providerProfileKey = selectedEngine === TRANSLATION_ENGINE_LOCAL ? '' : getActiveProviderProfileStorageKey(providerId);
+  const pageTitle = document.name.replace(/\.(?:md|markdown)$/i, '') || uiMessage('markdownUntitled', '未命名 Markdown 文档');
+  const now = Date.now();
+  const record = {
+    id: `markdown-import-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    pageTitle,
+    pageUrl: '',
+    sourceText: document.text,
+    translatedText: '',
+    sourceLang: sourceLanguage,
+    targetLang: targetLanguage,
+    engineId: selectedEngine,
+    engineStage: selectedEngine,
+    providerId,
+    providerProfileKey,
+    structuredBlocks: cloneImportedMarkdownBlocks(document.blocks),
+    pendingTranslationEngineId: selectedEngine,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  if (openImportedReaderBtn) openImportedReaderBtn.disabled = true;
+  try {
+    await chrome.storage.sync.set({ autoTranslateTargetLang: targetLanguage });
+    setStatus(uiMessage('markdownReaderPreparing', '正在准备 Markdown 结构化阅读…'), '');
+    const response = await chrome.runtime.sendMessage({ type: 'OPEN_READER_TAB', record });
+    if (!response?.ok) throw new Error(response?.error || 'READER_OPEN_FAILED');
+  } catch {
+    setStatus(uiMessage('markdownReaderFailed', '结构化阅读无法启动，请重试。'), 'err');
+  } finally {
+    if (openImportedReaderBtn) openImportedReaderBtn.disabled = !importedMarkdownDocument;
+  }
+}
+
+inputEl.addEventListener("input", () => {
+  updateCharCount();
+  if (!isApplyingImportedText) setImportedMarkdownDocument(null);
+});
+openImportedReaderBtn?.addEventListener('click', () => void openImportedMarkdownReader());
 importTextBtn?.addEventListener('click', () => {
   importTextFileInput?.click();
 });
@@ -1042,8 +1254,12 @@ importTextFileInput?.addEventListener('change', async () => {
       return;
     }
 
+    const markdownBlocks = isImportedMarkdownFile(file) ? parseImportedMarkdownBlocks(text) : [];
+    isApplyingImportedText = true;
+    setImportedMarkdownDocument(markdownBlocks.length ? { name: file.name, text, blocks: markdownBlocks } : null);
     inputEl.value = text;
     inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    isApplyingImportedText = false;
     inputEl.focus();
     setStatus(uiMessage('importFileLoaded', `已导入 ${file.name}（${text.length} 字符）`, [file.name, String(text.length)]), 'ok');
   } catch {
@@ -1054,6 +1270,7 @@ importTextFileInput?.addEventListener('change', async () => {
 });
 clearInputBtn?.addEventListener('click', () => {
   inputEl.value = '';
+  setImportedMarkdownDocument(null);
   updateCharCount();
   inputEl.focus();
   setStatus('', '');

@@ -359,6 +359,11 @@
         outline: none;
       }
       .icon-clear-btn:disabled { cursor: default; opacity: .3; }
+      .icon-import-reader-btn:hover:not(:disabled),
+      .icon-import-reader-btn:focus-visible:not(:disabled) {
+        color: #9fd5ff;
+        background: #1f2d37;
+      }
       body[data-active-tab="translation"] #historySection,
       body[data-active-tab="translation"] [data-console-section="settings"],
       body[data-active-tab="archive"] > .card > #pageActions,
@@ -2925,6 +2930,12 @@
                 <path d="M12 16V4"/>
                 <path d="m7 9 5-5 5 5"/>
                 <path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
+              </svg>
+            </button>
+            <button id="openImportedReaderBtn" class="icon-clear-btn icon-import-reader-btn" type="button" title="Markdown 结构化阅读" aria-label="Markdown 结构化阅读" disabled>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
               </svg>
             </button>
             <button id="clearInputBtn" class="icon-clear-btn" type="button" title="清空输入" aria-label="清空输入" disabled>

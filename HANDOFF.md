@@ -13,12 +13,28 @@ This pass improves recoverability, reading usability, and local provider-credent
 - **Static evidence:** `node --check` passed for `contentScript.js`, `popup.js`, and `background.js`; `git diff --check` passed; file-extracted normalizer checks passed for simplified/traditional Chinese, English pass-through, URL/decimal/citation preservation, and normalize-before-cache order.
 - **Live acceptance passed by user on 2026-07-22:** after reloading the extension and refreshing the webpage, the Chinese-target translation path behaved correctly. Keep cache reuse as a normal regression check when changing cache keys or provider routing later.
 
+## Web structured-reader reference repair — 2026-07-22
+
+- **Implemented:** the webpage structure extractor now constructs its URL object before testing origin and fragment. Same-page references such as `[1]` retain `targetAnchorId`, so the existing reader citation flow can locate the target block instead of silently discarding the link.
+- **Revision boundary:** `background.js`, `contentScript.js`, and `popup.js` declare `CONTENT_SCRIPT_VERSION = 1.6.22`; reload the unpacked extension and refresh the source webpage before live checking.
+- **Static evidence:** `node --check` passed for `contentScript.js`, `background.js`, `popup.js`, and `reader.js`; a file-extracted `#footnote-1` probe preserved `href`, `citationKey`, and `targetAnchorId`.
+- **Live acceptance passed by user on 2026-07-22:** after reloading the extension and refreshing the source webpage, a visible `[1]` again opened the reader reference path and jumped to its matching footnote block.
+
 ## Document import v1 — 2026-07-22
 
 - **Implemented:** the manual-translation source area now has an icon-only `.txt` / `.md` import control. It loads UTF-8 text into the existing input field without auto-translating, changing language settings, writing history, or creating a second reader model.
 - **Guardrails:** only text or Markdown file types are accepted; files over 2 MB, documents over 250,000 characters, empty files, and read failures stay out of the input and display an inline status. A UTF-8 BOM is removed before import; line breaks are otherwise preserved.
 - **Static evidence:** `node --check popup.js`, `node --check i18n.js`, both locale JSON parse checks, `git diff --check`, and static HTML/JS/i18n wiring checks passed.
 - **Live acceptance passed by user on 2026-07-22:** `.txt` / `.md` import works from the existing translation surface. The popup's sensitive endpoint / Key fields also now align with ordinary service inputs after the runtime wrapper receives the missing popup-grid rule.
+
+## Markdown structured reader v2 — 2026-07-22
+
+- **Implemented:** importing a Markdown file now enables an icon-only structure-reader action. It parses headings, paragraphs, ordered/unordered lists, block quotes, fenced code blocks, and simple pipe tables into the existing reader block format.
+- **Execution boundary:** the popup creates a transient reader draft and records the selected engine plus target language. The reader clears the one-time pending marker before calling its existing retranslation path, so refreshing the reader cannot issue the same translation twice. Imported documents still remain outside history and reading area until the user explicitly saves them there.
+- **Consistency:** reader retranslation now applies the same conservative Chinese punctuation normalization used by the manual and content-script paths.
+- **Links:** Markdown external `https:`, `http:`, and `mailto:` links are retained for headings, paragraphs, list items, quotes, and simple table cells. Image syntax and internal anchors remain plain text; unsafe URL schemes are rejected before they reach the reader.
+- **Static evidence:** `popup.js`, `reader.js`, and `i18n.js` syntax checks, both locale JSON parse checks, `git diff --check`, a file-extracted six-block Markdown parser sample, and draft/pending-engine wiring checks passed.
+- **Live acceptance passed by user on 2026-07-22:** the smoke Markdown file preserved headings, paragraphs, ordered/unordered lists, quotes, tables, code, and bilingual layout in the reader. Refresh did not repeat automatic translation, and imported external links opened through the existing link-choice flow. Code blocks appear twice with identical source and translation text in bilingual mode; this is a cosmetic follow-up, not a functional blocker.
 
 ## Pause checkpoint — 2026-07-21
 

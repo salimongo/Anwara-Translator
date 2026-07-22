@@ -7,10 +7,15 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 ### Added
 
 - The manual translation source area can import UTF-8 `.txt` and `.md` files into the existing text input. Imported content keeps its line breaks and stays under the user's current source-language, target-language, and engine choices until they explicitly start translation.
+- Imported Markdown can now open as a transient structured reader. The parser preserves headings, paragraphs, lists, quotes, fenced code blocks, and simple pipe tables, then uses the selected translation engine through the reader's existing retranslation pipeline. External HTTP(S) and mailto links are kept for the reader's existing safe link-choice flow.
 
 ### Changed
 
 - Chinese-target page, selection, and structured-reader translations now apply the same conservative punctuation normalization as manual translation before results enter the translation cache.
+
+### Fixed
+
+- Webpage structured reading retains same-page reference targets such as `[1]` instead of silently dropping them during link extraction, so the reader can use its existing citation jump flow.
 
 ### Safety
 

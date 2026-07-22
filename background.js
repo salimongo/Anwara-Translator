@@ -6,7 +6,7 @@ const KEY = {
   whitelist: 'whitelistPatterns',
 };
 
-const CONTENT_SCRIPT_VERSION = '1.6.21';
+const CONTENT_SCRIPT_VERSION = '1.6.22';
 const CONTEXT_MENU_ROOT_ID = 'translator-context-root';
 const CONTEXT_MENU_STRUCTURED_READER_ID = 'translator-structured-reader';
 const CONTEXT_MENU_RESTORE_ID = 'translator-restore-page';

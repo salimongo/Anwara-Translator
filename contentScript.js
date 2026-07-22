@@ -1,7 +1,7 @@
 // contentScript.js - Translate page text in-place using Chrome Translator API, preserving layout
 
 (() => {
-  const CONTENT_SCRIPT_VERSION = '1.6.21';
+  const CONTENT_SCRIPT_VERSION = '1.6.22';
   // Existing pages keep their old listeners. Tell the user the safe refresh boundary.
   if (window.translatorContentScriptLoaded) {
     if (window.translatorContentScriptVersion !== CONTENT_SCRIPT_VERSION && !document.getElementById('anwara-translator-refresh-notice')) {
@@ -1754,7 +1754,8 @@
         const text = getStructuredNodeText(current);
         if (!rawHref || !text) return;
         try {
-          const href = new URL(rawHref, document.baseURI || window.location.href).href;
+          const url = new URL(rawHref, document.baseURI || window.location.href);
+          const href = url.href;
           const samePage = url.origin === location.origin;
           if (/^(?:https?:|mailto:)/i.test(href) || (samePage && url.hash)) {
             const citationKey = extractStructuredCitationKey(text);

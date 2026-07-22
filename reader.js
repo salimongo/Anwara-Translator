@@ -108,6 +108,18 @@ function normalizeReaderLanguage(code) {
   return code === 'zh' ? 'zh-Hans' : code;
 }
 
+function normalizeChineseReaderPunctuation(text, targetLanguage) {
+  if (!['zh-Hans', 'zh-Hant'].includes(normalizeReaderLanguage(targetLanguage))) return String(text || '');
+  const han = '\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff';
+  return String(text || '')
+    .replace(new RegExp(`([${han}])\\s*,\\s*`, 'g'), '$1，')
+    .replace(new RegExp(`([${han}])\\s*;\\s*`, 'g'), '$1；')
+    .replace(new RegExp(`([${han}])\\s*:\\s*`, 'g'), '$1：')
+    .replace(new RegExp(`([${han}])\\s*!\\s*(?=\\s|$|[”）】])`, 'g'), '$1！')
+    .replace(new RegExp(`([${han}])\\s*\\?\\s*(?=\\s|$|[”）】])`, 'g'), '$1？')
+    .replace(new RegExp(`([${han}])\\s*\\.\\s*(?=\\s|$|[”）】])`, 'g'), '$1。');
+}
+
 function readerEngineLabel(engineId, providerId = '') {
   if (engineId === 'online') return uiMessage('onlineTranslation', '在线翻译') + (providerId ? ' · ' + (PROVIDER_LABELS[providerId] || providerId) : '');
   if (engineId === 'llm') return uiMessage('llmTranslation', '大模型翻译') + (providerId ? ' · ' + (PROVIDER_LABELS[providerId] || providerId) : '');
@@ -631,12 +643,12 @@ async function translateReaderText(text, engineId, providerId, providerProfileKe
       localReaderTranslator = await window.Translator.create({ sourceLanguage: sourceLang, targetLanguage: targetLang });
       localReaderTranslatorPair = pair;
     }
-    return await localReaderTranslator.translate(value);
+    return normalizeChineseReaderPunctuation(await localReaderTranslator.translate(value), targetLang);
   }
 
   const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text: value, sourceLang, targetLang, providerId, profileKey: providerProfileKey });
   if (!response?.ok) throw new Error(response?.error || '翻译服务请求失败');
-  return response.translation || value;
+  return normalizeChineseReaderPunctuation(response.translation || value, targetLang);
 }
 
 async function translateReaderBlocks(blocks, engineId, providerId, providerProfileKey, sourceLang, targetLang) {
@@ -1246,6 +1258,16 @@ async function loadHistoryItem() {
   }
 }
 
+async function runPendingReaderTranslation() {
+  const engineId = String(state.item?.pendingTranslationEngineId || '');
+  if (!['local', 'online', 'llm'].includes(engineId)) return;
+
+  const { pendingTranslationEngineId, ...readyItem } = state.item;
+  state.item = readyItem;
+  await persistReaderItem();
+  await retranslateCurrentItem(engineId);
+}
+
 async function copyTranslated() {
   if (!state.item) return;
   const text = normalizeText(state.item.translatedText);
@@ -1344,5 +1366,6 @@ document.addEventListener('keydown', (event) => {
   await loadPreferences();
   await loadHistoryItem();
   await refreshRetranslateOptions();
+  await runPendingReaderTranslation();
   await restoreReaderPosition();
 })();
