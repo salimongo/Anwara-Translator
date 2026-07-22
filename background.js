@@ -4,11 +4,13 @@ const KEY = {
   auto: 'autoTranslateEnabled',
   target: 'autoTranslateTargetLang',
   whitelist: 'whitelistPatterns',
+  contextVocabulary: 'contextVocabularyEnabled',
 };
 
 const CONTENT_SCRIPT_VERSION = '1.6.22';
 const CONTEXT_MENU_ROOT_ID = 'translator-context-root';
 const CONTEXT_MENU_STRUCTURED_READER_ID = 'translator-structured-reader';
+const CONTEXT_MENU_SAVE_VOCABULARY_ID = 'translator-save-selection-vocabulary';
 const CONTEXT_MENU_RESTORE_ID = 'translator-restore-page';
 const CONTEXT_ENGINE_MENU_IDS = {
   local: 'translator-translate-local',
@@ -29,11 +31,14 @@ const CONTEXT_ENGINE_LABELS = {
 };
 
 let contextMenuBuildPromise = null;
+let vocabularyMenuMutationPromise = Promise.resolve();
 const LLM_PROFILE_KEY = 'translatorLlmProfile';
 const PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
 const PROVIDER_CREDENTIALS_KEY = 'translatorProviderCredentials';
 const PROVIDER_ACTIVE_PROFILE_KEY = 'translatorProviderActiveProfileIds';
 const READER_DRAFTS_KEY = 'translatorReaderDrafts';
+const VOCABULARY_KEY = 'translatorVocabulary';
+const VOCABULARY_LIMIT = 1000;
 const readerDraftTabs = new Map();
 
 // Provider registry follows FluentRead's service/token/model/custom-url split,
@@ -376,6 +381,7 @@ function createContextMenus() {
       title: CONTEXT_ENGINE_LABELS[engineId],
       contexts: ['page', 'selection']
     })),
+    createVocabularyContextMenuDefinition(),
     {
       id: CONTEXT_MENU_STRUCTURED_READER_ID,
       parentId: CONTEXT_MENU_ROOT_ID,
@@ -432,6 +438,46 @@ function setRestoreMenuEnabled(enabled) {
       console.warn('Failed to update restore context menu:', error.message);
     }
   });
+}
+
+function createVocabularyContextMenuDefinition() {
+  return {
+    id: CONTEXT_MENU_SAVE_VOCABULARY_ID,
+    parentId: CONTEXT_MENU_ROOT_ID,
+    title: localizedMessage('addToVocabulary', '添加到词汇'),
+    contexts: ['selection']
+  };
+}
+
+function setVocabularyContextMenuVisible(enabled) {
+  const shouldShow = Boolean(enabled);
+  vocabularyMenuMutationPromise = vocabularyMenuMutationPromise
+    .catch(() => undefined)
+    .then(() => new Promise((resolve) => {
+      chrome.contextMenus.remove(CONTEXT_MENU_SAVE_VOCABULARY_ID, () => {
+        // The item can already be absent after a full menu rebuild.
+        void chrome.runtime.lastError;
+        if (!shouldShow) {
+          resolve();
+          return;
+        }
+        chrome.contextMenus.create(createVocabularyContextMenuDefinition(), () => {
+          const error = chrome.runtime.lastError;
+          if (error) console.warn('Failed to create vocabulary context menu:', error.message);
+          resolve();
+        });
+      });
+    }));
+  return vocabularyMenuMutationPromise;
+}
+
+async function syncVocabularyContextMenuVisibility() {
+  try {
+    const settings = await chrome.storage.sync.get([KEY.contextVocabulary]);
+    setVocabularyContextMenuVisible(settings[KEY.contextVocabulary] !== false);
+  } catch (error) {
+    console.warn('Failed to sync vocabulary context-menu visibility:', error);
+  }
 }
 
 async function setRestoreMenuForTab(tabId, enabled) {
@@ -621,8 +667,8 @@ function isUrlInWhitelist(url, patterns) {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  createContextMenus();
-  const s = await chrome.storage.sync.get([KEY.auto, KEY.target, KEY.whitelist]);
+  await createContextMenus();
+  const s = await chrome.storage.sync.get([KEY.auto, KEY.target, KEY.whitelist, KEY.contextVocabulary]);
   if (typeof s[KEY.auto] === 'undefined') {
     await chrome.storage.sync.set({ [KEY.auto]: false });
   }
@@ -632,9 +678,21 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (typeof s[KEY.whitelist] === 'undefined') {
     await chrome.storage.sync.set({ [KEY.whitelist]: [] });
   }
+  if (typeof s[KEY.contextVocabulary] === 'undefined') {
+    await chrome.storage.sync.set({ [KEY.contextVocabulary]: true });
+  }
+  setVocabularyContextMenuVisible(s[KEY.contextVocabulary] !== false);
 });
 
-chrome.runtime.onStartup.addListener(createContextMenus);
+chrome.runtime.onStartup.addListener(async () => {
+  await createContextMenus();
+  await syncVocabularyContextMenuVisibility();
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'sync' || !changes[KEY.contextVocabulary]) return;
+  setVocabularyContextMenuVisible(changes[KEY.contextVocabulary].newValue !== false);
+});
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   syncRestoreMenuForTab(tabId);
 });
@@ -644,11 +702,68 @@ function getContextEngineId(menuItemId) {
     .find(([, id]) => id === menuItemId)?.[0] || null;
 }
 
+function normalizeVocabularyValue(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function getVocabularyDedupKey(entry) {
+  return [entry?.term, entry?.sourceText, entry?.pageUrl || entry?.pageTitle]
+    .map((value) => normalizeVocabularyValue(value).toLocaleLowerCase())
+    .join('␟');
+}
+
+async function saveContextSelectionToVocabulary(info, tab) {
+  const term = normalizeVocabularyValue(info.selectionText);
+  if (!term) return { ok: false, reason: 'EMPTY_SELECTION' };
+
+  const entry = {
+    id: `vocab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    term,
+    sourceText: term,
+    translatedText: '',
+    pageTitle: String(tab?.title || '').trim(),
+    pageUrl: /^https?:\/\//i.test(String(tab?.url || '')) ? String(tab.url).trim() : '',
+    createdAt: Date.now(),
+    status: 'pending'
+  };
+  const result = await chrome.storage.local.get([VOCABULARY_KEY]);
+  const vocabulary = Array.isArray(result[VOCABULARY_KEY])
+    ? result[VOCABULARY_KEY].filter((item) => item && typeof item === 'object' && item.id)
+    : [];
+  if (vocabulary.some((item) => getVocabularyDedupKey(item) === getVocabularyDedupKey(entry))) {
+    return { ok: true, duplicate: true };
+  }
+  vocabulary.unshift(entry);
+  await chrome.storage.local.set({ [VOCABULARY_KEY]: vocabulary.slice(0, VOCABULARY_LIMIT) });
+  return { ok: true, duplicate: false };
+}
+
+function flashVocabularyBadge(tabId, duplicate) {
+  if (!Number.isInteger(tabId)) return;
+  const text = duplicate ? '·' : '✓';
+  const color = duplicate ? '#64748b' : '#0f766e';
+  chrome.action.setBadgeBackgroundColor({ tabId, color }, () => {});
+  chrome.action.setBadgeText({ tabId, text }, () => {});
+  setTimeout(() => chrome.action.setBadgeText({ tabId, text: '' }, () => {}), 1400);
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const engineId = getContextEngineId(info.menuItemId);
   const isStructuredReader = info.menuItemId === CONTEXT_MENU_STRUCTURED_READER_ID;
+  const isSaveVocabulary = info.menuItemId === CONTEXT_MENU_SAVE_VOCABULARY_ID;
   const isRestore = info.menuItemId === CONTEXT_MENU_RESTORE_ID;
-  if ((!engineId && !isStructuredReader && !isRestore) || !tab?.id) return;
+  if ((!engineId && !isStructuredReader && !isSaveVocabulary && !isRestore) || !tab?.id) return;
+
+  if (isSaveVocabulary) {
+    try {
+      const result = await saveContextSelectionToVocabulary(info, tab);
+      if (!result.ok) console.warn('Vocabulary context-menu action was not accepted:', result.reason);
+      else flashVocabularyBadge(tab.id, result.duplicate);
+    } catch (error) {
+      console.warn('Vocabulary context-menu action failed:', error);
+    }
+    return;
+  }
 
   const url = tab.url || '';
   if (!/^https?:|^file:|^chrome-extension:/.test(url)) return;

@@ -6,6 +6,10 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 
 ### Added
 
+- The structured reader can save a selected word or sentence into a local vocabulary list with its nearby source/translation context, page title/URL, and capture time. The archive now exposes that vocabulary for search, individual deletion, clear-all, and the same eight-second undo path used by history and reading-area records.
+- Vocabulary can now be exported as a local JSON backup and imported from that same backup format. Import previews new, duplicate, and invalid counts before confirmation, then merges only new valid entries without overwriting existing vocabulary or exporting provider configuration/credentials.
+- A selected web-page word or phrase can now be saved directly through **Anwara Translator → Add to vocabulary** in the browser context menu. The shortcut records the selected text with its current page title and HTTP(S) URL, rejects duplicates, and gives a brief toolbar-badge acknowledgment.
+- A vocabulary entry saved from an imported Markdown reader now keeps only that reader record's ID. Once the document is deliberately added to Reading, the vocabulary card can reopen it through **Open reading** without duplicating its content into vocabulary storage or backups.
 - The manual translation source area can import UTF-8 `.txt` and `.md` files into the existing text input. Imported content keeps its line breaks and stays under the user's current source-language, target-language, and engine choices until they explicitly start translation.
 - Imported Markdown can now open as a transient structured reader. The parser preserves headings, paragraphs, lists, quotes, fenced code blocks, and simple pipe tables, then uses the selected translation engine through the reader's existing retranslation pipeline. External HTTP(S) and mailto links are kept for the reader's existing safe link-choice flow; same-document heading links such as `[Jump](#section)` now scroll directly to their target heading.
 
@@ -13,12 +17,17 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 
 - Chinese-target page, selection, and structured-reader translations now apply the same conservative punctuation normalization as manual translation before results enter the translation cache.
 - Imported Markdown readers now use their first level-one heading as the document title, falling back to the file name when no such heading exists.
+- Vocabulary tools in the toolbar popup now use one compact search-and-actions row followed by the status filter, rather than retaining empty history-management grid rows. Their filter and backup/clear buttons now share explicit line-height and flex alignment in both popup and full-console modes.
+- The context-menu vocabulary shortcut is independently controlled by **Settings → Right-click add to vocabulary**. It defaults on, and changing the toggle hides or shows only that menu item immediately.
 
 ### Fixed
 
 - Webpage structured reading retains same-page reference targets such as `[1]` instead of silently dropping them during link extraction, so the reader can use its existing citation jump flow.
 - In dual-language reading mode, code blocks whose translated text is identical to their source now render once instead of as duplicate blocks. Source-only and translated-only modes remain unchanged.
 - Removing an imported Markdown document from the reading area, whether from the reader or the console, now restores its active reader as a session draft before deleting the reading-area copy. Refreshing the open reader no longer loses content or silently creates a history record.
+- Vocabulary cards now honor their hidden translated-context state. A source-only entry saved from the webpage context menu no longer renders the misleading `No saved translation context` placeholder line.
+- In the full console, expanding one vocabulary card's source context no longer stretches every card in its grid row to the same height.
+- The toolbar action popup now closes on ordinary outside focus loss without closing when a local `.txt`, `.md`, or vocabulary-backup file picker is open; selected files continue into their original import flow.
 
 ### Safety
 

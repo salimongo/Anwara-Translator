@@ -112,6 +112,10 @@ button { border: 0; }
 .mode-tab:hover { color: #fff; background: #293038; border-color: #63869d; }
 .reader-top-btn:disabled { cursor: default; opacity: .34; }
 .reader-reading-btn.is-active { border-color: var(--reader-accent); color: var(--reader-heading); background: var(--reader-active-bg); }
+.reader-vocabulary-btn:disabled { cursor: default; opacity: .42; }
+.reader-vocabulary-btn[data-feedback="ok"] { color:#dff8ed; border-color:#4f9b78; background:#214434; opacity:1; }
+.reader-vocabulary-btn[data-feedback="note"] { color:#f8e6b8; border-color:#a98743; background:#4a3a1f; opacity:1; }
+.reader-vocabulary-btn[data-feedback="err"] { color:#ffd4d4; border-color:#b45b5b; background:#4d272a; opacity:1; }
 
 .reader-paper {
   width: min(100%, 960px);

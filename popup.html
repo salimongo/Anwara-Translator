@@ -577,7 +577,96 @@
       [data-console-section="settings"] a:hover { background: #303038 !important; border-color: var(--primary-strong) !important; }
       .hidden { display: none !important; }
       .archive-viewbar { display:flex; align-items:center; gap:8px; margin:4px 0 8px; }
-      .archive-tabs { display:grid; grid-template-columns:1fr 1fr; gap:3px; flex:1; padding:3px; border:1px solid #3f3f46; border-radius:7px; background:#18181a; }
+      .archive-tabs { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:3px; flex:1; padding:3px; border:1px solid #3f3f46; border-radius:7px; background:#18181a; }
+      #historySection.vocabulary-view .history-tool-options,
+      #historySection.vocabulary-view .history-engine-row,
+      #historySection.vocabulary-view .history-filter-row,
+      #historySection.vocabulary-view .history-tool-row,
+      #historySection.vocabulary-view .history-date-row,
+      #historySection.vocabulary-view #historyEngineFilter,
+      #historySection.vocabulary-view #deleteDateHistoryBtn { display:none !important; }
+      #historySection.vocabulary-view .history-tools {
+        grid-template-columns:minmax(0, 1fr) auto;
+        grid-template-areas:"query actions";
+        grid-template-rows:auto;
+        grid-auto-rows:min-content;
+        align-content:start;
+        align-items:center;
+        gap:8px;
+        min-height:0;
+      }
+      #historySection.vocabulary-view .history-query-row { display:block; grid-area:query; min-width:0; }
+      #historySection.vocabulary-view .history-query-row input { width:100%; }
+      #historySection.vocabulary-view .history-bulk-row {
+        display:flex;
+        grid-area:actions;
+        align-items:center;
+        gap:5px;
+        margin:0;
+        width:auto;
+        white-space:nowrap;
+      }
+      .vocabulary-backup-action { display:none !important; }
+      #historySection.vocabulary-view .vocabulary-backup-action { display:inline-flex !important; }
+      #historySection.vocabulary-view .history-bulk-row .btn,
+      #historySection.vocabulary-view #clearHistoryBtn {
+        display:inline-flex !important;
+        align-items:center;
+        justify-content:center;
+        width:auto !important;
+        min-height:32px;
+        padding:0 10px;
+        line-height:1;
+        white-space:nowrap;
+      }
+      #historySection.vocabulary-view #vocabularyStatusFilter { display:flex !important; margin:0 0 8px; }
+      .vocabulary-status-filter { align-items:center; min-height:38px; gap:4px; margin:0 0 8px; padding:3px; border:1px solid #3d424a; border-radius:7px; background:#191b1e; }
+      .vocabulary-filter-btn {
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width:auto !important;
+        min-height:32px;
+        padding:0 10px;
+        border:0;
+        border-radius:5px;
+        color:#9ea8b4;
+        background:transparent;
+        font-size:10px;
+        line-height:1;
+        cursor:pointer;
+      }
+      .vocabulary-filter-btn:hover { color:#e8edf2; background:#2b3037; }
+      .vocabulary-filter-btn.is-active { color:#10212d; background:#a9d9ff; font-weight:700; }
+      .vocabulary-card { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:7px 12px; min-height:0 !important; height:auto !important; padding:12px !important; }
+      .vocabulary-card-term { min-width:0; color:#e8edf2; font-size:13px; line-height:1.45; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .vocabulary-card-context { grid-column:1 / -1; min-width:0; border-top:1px solid #363b42; padding-top:7px; }
+      .vocabulary-card-context summary { color:#99aabd; font-size:10px; cursor:pointer; user-select:none; }
+      .vocabulary-card-context[open] summary { margin-bottom:6px; color:#c0d9ec; }
+      .vocabulary-card-source, .vocabulary-card-translated { min-width:0; line-height:1.52; font-size:11px; overflow-wrap:anywhere; }
+      .vocabulary-card-source { color:#d9e1e8; white-space:pre-wrap; }
+      .vocabulary-card-translated { grid-column:1 / -1; display:-webkit-box; overflow:hidden; -webkit-box-orient:vertical; -webkit-line-clamp:2; color:#8ed7c8; }
+      .vocabulary-card-translated[hidden] { display:none !important; }
+      .vocabulary-card-meta { min-width:0; color:#8f9aa5; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .vocabulary-card-actions { grid-column:2; grid-row:1; display:flex; gap:5px; margin:0 !important; align-self:start; }
+      .vocabulary-card-actions .history-action { width:auto !important; }
+      .vocabulary-status-btn.is-pending { border-color:#827048 !important; color:#f4d78b !important; }
+      .vocabulary-status-btn.is-mastered { border-color:#467c65 !important; color:#9fe1bf !important; }
+      body.full-console #historySection.vocabulary-view .history-tools { grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:none; grid-template-rows:auto; grid-auto-rows:min-content; align-content:start; align-items:center; gap:8px; width:min(420px, calc(100vw - 72px)); padding:8px; }
+      body.full-console #historySection.vocabulary-view #vocabularyStatusFilter { grid-column:1; margin:0; }
+      body.full-console #historySection.vocabulary-view .history-bulk-row { display:flex; grid-column:2; margin:0; width:auto; }
+      body.full-console #historySection.vocabulary-view .vocabulary-backup-action,
+      body.full-console #historySection.vocabulary-view #clearHistoryBtn { min-height:32px; padding:0 10px; }
+      body.full-console #historySection.vocabulary-view .history-list {
+        max-height:none !important;
+        overflow:visible !important;
+        align-items:start;
+      }
+      body.full-console #historySection.vocabulary-view .vocabulary-card {
+        align-self:start;
+        height:auto !important;
+        min-height:0 !important;
+      }
       .archive-tab, .reader-mode-tab { width:100%; min-height:30px; padding:5px 8px; border:0; border-radius:5px; background:transparent !important; color:#a1a1aa !important; font-size:11px; cursor:pointer; }
       .archive-tab:hover, .reader-mode-tab:hover { background:#2a2a2e !important; color:#f4f4f5 !important; }
       .archive-tab.is-active, .reader-mode-tab.is-active { background:#a9d9ff !important; color:#11202a !important; font-weight:700; box-shadow:0 0 10px rgba(120,189,241,.16); }
@@ -1942,7 +2031,8 @@
       }
       body.full-console #historySection .history-card {
         align-self:stretch;
-        height:216px;
+        height:184px;
+        min-height:184px;
         padding:12px !important;
         border: 1px solid var(--console-border) !important;
         border-radius: 5px !important;
@@ -3026,11 +3116,13 @@
           <div class="archive-tabs" role="tablist" aria-label="历史与阅读区">
             <button class="archive-tab is-active" type="button" role="tab" aria-selected="true" data-history-view="all">历史翻译</button>
             <button class="archive-tab" type="button" role="tab" aria-selected="false" data-history-view="reading">阅读区</button>
+            <button class="archive-tab" type="button" role="tab" aria-selected="false" data-history-view="vocabulary">词汇</button>
           </div>
         </div>
         <select id="historyViewSelect" class="history-view-select" aria-hidden="true" tabindex="-1">
           <option value="all">全部历史</option>
           <option value="reading">阅读区</option>
+          <option value="vocabulary">词汇</option>
         </select>
         <div id="historyTools" class="history-tools hidden">
           <div class="history-tool-options">
@@ -3063,10 +3155,18 @@
           </div>
           <div class="history-bulk-row">
             <button id="deleteDateHistoryBtn" class="btn" type="button">删日期范围</button>
+            <button id="exportVocabularyBtn" class="btn vocabulary-backup-action" type="button">导出</button>
+            <button id="importVocabularyBtn" class="btn vocabulary-backup-action" type="button">导入</button>
             <button id="clearHistoryBtn" class="btn" type="button">清空全部</button>
+            <input id="importVocabularyFileInput" type="file" accept="application/json,.json" hidden>
           </div>
         </div>
         <div id="historyStatus" class="small history-status" aria-live="polite"></div>
+        <div id="vocabularyStatusFilter" class="vocabulary-status-filter hidden" role="group" aria-label="词汇状态筛选">
+          <button class="vocabulary-filter-btn is-active" type="button" data-vocabulary-status="all" aria-pressed="true">全部</button>
+          <button class="vocabulary-filter-btn" type="button" data-vocabulary-status="pending" aria-pressed="false">待看</button>
+          <button class="vocabulary-filter-btn" type="button" data-vocabulary-status="mastered" aria-pressed="false">已掌握</button>
+        </div>
         <div id="historyList" class="history-list">
           <div class="small" style="padding:14px;text-align:center;color:var(--muted);">暂无历史翻译</div>
         </div>
@@ -3123,6 +3223,20 @@
             </div>
             <label class="toggle-switch" style="position:relative;display:inline-block;width:44px;height:24px;">
               <input id="selectionToggle" type="checkbox" style="opacity:0;width:0;height:0;">
+              <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;border-radius:24px;transition:0.3s;"></span>
+            </label>
+          </div>
+
+          <!-- 右键词汇快捷入口 -->
+          <div class="switch-item" style="display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;flex-direction:column;">
+              <label class="small" style="color:var(--text);cursor:pointer;font-weight:500;" for="contextVocabularyToggle">
+                右键添加词汇
+              </label>
+              <span id="contextVocabularyToggleStatus" class="small" style="color:var(--muted);font-size:10px;margin-top:2px;">已开启</span>
+            </div>
+            <label class="toggle-switch" style="position:relative;display:inline-block;width:44px;height:24px;">
+              <input id="contextVocabularyToggle" type="checkbox" style="opacity:0;width:0;height:0;">
               <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;border-radius:24px;transition:0.3s;"></span>
             </label>
           </div>

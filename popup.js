@@ -22,6 +22,17 @@ const MAX_IMPORTED_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORTED_TEXT_CHARS = 250000;
 let importedMarkdownDocument = null;
 let isApplyingImportedText = false;
+let localFilePickerOpen = false;
+
+function openLocalFilePicker(input) {
+  if (!input) return;
+  localFilePickerOpen = true;
+  input.click();
+}
+
+function clearLocalFilePickerState() {
+  localFilePickerOpen = false;
+}
 
 const statusEl = document.getElementById("status");
 const translateBtn = document.getElementById("translateBtn");
@@ -33,11 +44,13 @@ const selectionToggle = document.getElementById("selectionToggle");
 const floatingToggle = document.getElementById("floatingToggle");
 const selectionBilingualToggle = document.getElementById("selectionBilingualToggle");
 const selectionSourceToggle = document.getElementById("selectionSourceToggle");
+const contextVocabularyToggle = document.getElementById("contextVocabularyToggle");
 const autoToggleStatus = document.getElementById("autoToggleStatus");
 const selectionToggleStatus = document.getElementById("selectionToggleStatus");
 const floatingToggleStatus = document.getElementById("floatingToggleStatus");
 const selectionBilingualToggleStatus = document.getElementById("selectionBilingualToggleStatus");
 const selectionSourceToggleStatus = document.getElementById("selectionSourceToggleStatus");
+const contextVocabularyToggleStatus = document.getElementById("contextVocabularyToggleStatus");
 const selectionPanelDefaultWidthInput = document.getElementById('selectionPanelDefaultWidth');
 const selectionPanelDefaultHeightInput = document.getElementById('selectionPanelDefaultHeight');
 const selectionPanelDefaultSizeSaveBtn = document.getElementById('selectionPanelDefaultSizeSaveBtn');
@@ -80,6 +93,7 @@ const providerProfileStatus = document.getElementById('providerProfileStatus');
 
 const SELECTION_SHOW_BILINGUAL_KEY = 'translatorSelectionShowBilingual';
 const SELECTION_SHOW_SOURCE_KEY = 'translatorSelectionShowSource';
+const CONTEXT_VOCABULARY_ENABLED_KEY = 'contextVocabularyEnabled';
 const SAME_LANGUAGE_MODE_KEY = 'translatorSameLanguageMode';
 const MANUAL_SOURCE_LANGUAGE_KEY = 'translatorManualSourceLang';
 const SELECTION_PANEL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelDefaultSize';
@@ -168,6 +182,9 @@ const historyToDate = document.getElementById('historyToDate');
 const deleteSelectedHistoryBtn = document.getElementById('deleteSelectedHistoryBtn');
 const deleteDateHistoryBtn = document.getElementById('deleteDateHistoryBtn');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+const exportVocabularyBtn = document.getElementById('exportVocabularyBtn');
+const importVocabularyBtn = document.getElementById('importVocabularyBtn');
+const importVocabularyFileInput = document.getElementById('importVocabularyFileInput');
 const historyStatus = document.getElementById('historyStatus');
 const historyList = document.getElementById('historyList');
 const historySearchInput = document.getElementById('historySearchInput');
@@ -175,6 +192,8 @@ const historyEngineFilter = document.getElementById('historyEngineFilter');
 const historySiteFilter = document.getElementById('historySiteFilter');
 const historyDedupeToggle = document.getElementById('historyDedupeToggle');
 const historyUndoBtn = document.getElementById('historyUndoBtn');
+const vocabularyStatusFilterEl = document.getElementById('vocabularyStatusFilter');
+const vocabularyStatusFilterButtons = Array.from(document.querySelectorAll('[data-vocabulary-status]'));
 if (refreshHistoryBtn) {
   refreshHistoryBtn.classList.add('archive-icon-btn');
   refreshHistoryBtn.setAttribute('aria-label', '刷新历史记录');
@@ -197,8 +216,14 @@ const READER_DRAFTS_KEY = 'translatorReaderDrafts';
 const READER_POSITIONS_KEY = 'translatorReaderPositions';
 const HISTORY_ENABLED_KEY = 'translatorHistoryEnabled';
 const AUTO_READING_KEY = 'translatorAutoAddToReading';
+const VOCABULARY_KEY = 'translatorVocabulary';
+const VOCABULARY_LIMIT = 1000;
+const VOCABULARY_BACKUP_FORMAT = 'anwara-translator-vocabulary';
+const MAX_VOCABULARY_BACKUP_BYTES = 2 * 1024 * 1024;
 let historyItems = [];
 let readingItems = [];
+let vocabularyItems = [];
+let vocabularyStatusFilter = 'all';
 let readerPositions = {};
 let historyLoaded = false;
 let historyLoadPromise = null;
@@ -224,9 +249,9 @@ function normalizeStoredItems(value) {
 }
 
 function getClearLabel(view) {
-  return view === 'reading'
-    ? uiMessage('clearReading', '清空阅读区')
-    : uiMessage('clearHistory', '清空历史');
+  if (view === 'reading') return uiMessage('clearReading', '清空阅读区');
+  if (view === 'vocabulary') return uiMessage('clearVocabulary', '清空词汇');
+  return uiMessage('clearHistory', '清空历史');
 }
 
 function resetClearConfirmation() {
@@ -264,8 +289,23 @@ let readerFontSize = 17;
 let readerMode = 'dual';
 
 function syncArchiveTabs(view) {
-  const activeView = view === 'reading' ? 'reading' : 'all';
+  const activeView = ['all', 'reading', 'vocabulary'].includes(view) ? view : 'all';
   if (historyViewSelect) historyViewSelect.value = activeView;
+  historySection?.classList.toggle('vocabulary-view', activeView === 'vocabulary');
+  vocabularyStatusFilterEl?.classList.toggle('hidden', activeView !== 'vocabulary');
+  vocabularyStatusFilterButtons.forEach((button) => {
+    const isActive = button.dataset.vocabularyStatus === vocabularyStatusFilter;
+    button.classList.toggle('is-active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
+  if (historySearchInput) {
+    historySearchInput.placeholder = activeView === 'vocabulary'
+      ? uiMessage('vocabularySearchPlaceholder', '搜索词汇、上下文或来源')
+      : uiMessage('historySearchPlaceholder', '搜索原文、译文或标题');
+    historySearchInput.setAttribute('aria-label', activeView === 'vocabulary'
+      ? uiMessage('searchVocabulary', '搜索词汇')
+      : uiMessage('historySearchPlaceholder', '搜索历史翻译'));
+  }
   archiveTabs.forEach((tab) => {
     const isActive = tab.dataset.historyView === activeView;
     tab.classList.toggle('is-active', isActive);
@@ -394,6 +434,7 @@ function setHistoryView(view) {
   resetClearConfirmation();
   closeReader();
   syncArchiveTabs(view);
+  if (getActiveArchiveView() === 'vocabulary') setHistoryToolsOpen(true);
   renderHistoryList();
 }
 
@@ -419,6 +460,33 @@ function setHistoryStatus(message, kind = '') {
   historyStatus.style.color = kind === 'err' ? '#b91c1c' : kind === 'ok' ? '#047857' : 'var(--muted)';
 }
 
+let vocabularyImportNoticeTimer = null;
+function setVocabularyImportFeedback(message, kind = '') {
+  setHistoryStatus(message, kind);
+  if (!document.body?.classList.contains('full-console')) return;
+  let notice = document.getElementById('anwara-vocabulary-import-notice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'anwara-vocabulary-import-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    notice.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:2147483647;max-width:min(420px,calc(100vw - 48px));padding:10px 12px;border:1px solid transparent;border-radius:8px;box-shadow:0 12px 28px rgba(0,0,0,.24);font-size:13px;line-height:1.4;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .18s ease,transform .18s ease;';
+    document.body.appendChild(notice);
+  }
+  const isError = kind === 'err';
+  notice.textContent = uiText(message);
+  notice.style.color = isError ? '#fecaca' : '#bbf7d0';
+  notice.style.background = isError ? '#450a0a' : '#063b2c';
+  notice.style.borderColor = isError ? '#7f1d1d' : '#166534';
+  notice.style.opacity = '1';
+  notice.style.transform = 'translateY(0)';
+  if (vocabularyImportNoticeTimer) window.clearTimeout(vocabularyImportNoticeTimer);
+  vocabularyImportNoticeTimer = window.setTimeout(() => {
+    notice.style.opacity = '0';
+    notice.style.transform = 'translateY(8px)';
+  }, 3200);
+}
+
 function formatHistoryTime(timestamp) {
   try {
     return new Date(timestamp).toLocaleString('zh-CN', {
@@ -438,21 +506,26 @@ function getHistoryDedupeKey(item) {
 
 function getFilteredHistoryItems() {
   const sourceItems = getActiveArchiveItems();
+  const activeView = getActiveArchiveView();
   const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
   const to = historyToDate?.value ? new Date(`${historyToDate.value}T23:59:59.999`).getTime() : null;
-  const query = [historySearchInput?.value, historySiteFilter?.value].filter(Boolean).join(' ').trim().toLocaleLowerCase();
+  const query = [historySearchInput?.value, activeView === 'vocabulary' ? '' : historySiteFilter?.value].filter(Boolean).join(' ').trim().toLocaleLowerCase();
   const engine = historyEngineFilter?.value || '';
   const seen = new Set();
   return sourceItems.filter((item) => {
-    if (from !== null && item.createdAt < from) return false;
-    if (to !== null && item.createdAt > to) return false;
-    if (engine && (item.engineId || item.engineStage || 'local') !== engine) return false;
-    if (query) {
-      const haystack = [item.sourceText, item.translatedText, item.pageTitle, item.pageUrl, item.engineId, item.engineStage, item.providerId]
-        .map((value) => String(value || '').toLocaleLowerCase()).join('\n');
-      if (!haystack.includes(query)) return false;
+    if (activeView === 'vocabulary' && vocabularyStatusFilter !== 'all' && (item.status || 'pending') !== vocabularyStatusFilter) return false;
+    if (activeView !== 'vocabulary') {
+      if (from !== null && item.createdAt < from) return false;
+      if (to !== null && item.createdAt > to) return false;
+      if (engine && (item.engineId || item.engineStage || 'local') !== engine) return false;
     }
-    if (historyDedupeToggle?.checked) {
+    if (query) {
+      const haystack = activeView === 'vocabulary'
+        ? [item.term, item.sourceText, item.translatedText, item.pageTitle, item.pageUrl]
+        : [item.sourceText, item.translatedText, item.pageTitle, item.pageUrl, item.engineId, item.engineStage, item.providerId];
+      if (!haystack.map((value) => String(value || '').toLocaleLowerCase()).join('\n').includes(query)) return false;
+    }
+    if (activeView !== 'vocabulary' && historyDedupeToggle?.checked) {
       const key = getHistoryDedupeKey(item);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -499,6 +572,7 @@ function armArchiveUndo(description) {
   archiveUndoStack.push({
     historyItems: historyItems.map((item) => ({ ...item })),
     readingItems: readingItems.map((item) => ({ ...item })),
+    vocabularyItems: vocabularyItems.map((item) => ({ ...item })),
     description
   });
   archiveUndoStack = archiveUndoStack.slice(-12);
@@ -511,7 +585,12 @@ function armArchiveUndo(description) {
 async function persistArchiveState(options = {}) {
   historyItems = normalizeStoredItems(historyItems);
   readingItems = normalizeStoredItems(readingItems);
-  await chrome.storage.local.set({ [HISTORY_KEY]: historyItems, [READING_KEY]: readingItems });
+  vocabularyItems = normalizeStoredItems(vocabularyItems).slice(0, VOCABULARY_LIMIT);
+  await chrome.storage.local.set({
+    [HISTORY_KEY]: historyItems,
+    [READING_KEY]: readingItems,
+    [VOCABULARY_KEY]: vocabularyItems
+  });
   if (historyLoaded) renderHistoryList(options);
 }
 
@@ -528,6 +607,7 @@ async function restoreArchiveUndo() {
   updateArchiveUndoButton();
   historyItems = snapshot.historyItems.map((item) => ({ ...item }));
   readingItems = snapshot.readingItems.map((item) => ({ ...item }));
+  vocabularyItems = (snapshot.vocabularyItems || []).map((item) => ({ ...item }));
   try {
     await persistArchiveState();
     setHistoryStatus('', '');
@@ -537,15 +617,112 @@ async function restoreArchiveUndo() {
 }
 
 function getActiveArchiveView() {
-  return historyViewSelect?.value === 'reading' ? 'reading' : 'all';
+  return ['reading', 'vocabulary'].includes(historyViewSelect?.value) ? historyViewSelect.value : 'all';
 }
 
 function getActiveArchiveItems() {
-  return getActiveArchiveView() === 'reading' ? readingItems : historyItems;
+  const view = getActiveArchiveView();
+  if (view === 'reading') return readingItems;
+  if (view === 'vocabulary') return vocabularyItems;
+  return historyItems;
 }
 
 function getActiveArchiveLabel() {
-  return getActiveArchiveView() === 'reading' ? '阅读区' : '历史翻译';
+  const view = getActiveArchiveView();
+  if (view === 'reading') return '阅读区';
+  if (view === 'vocabulary') return '词汇';
+  return '历史翻译';
+}
+
+function getVocabularyBackupKey(item) {
+  return [item?.term, item?.sourceText, item?.pageUrl || item?.pageTitle]
+    .map((value) => String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase())
+    .join('␟');
+}
+
+function normalizeVocabularyBackupItem(value) {
+  if (!value || typeof value !== 'object') return null;
+  const term = String(value.term || '').replace(/\s+/g, ' ').trim();
+  if (!term) return null;
+  return {
+    id: typeof value.id === 'string' && value.id.trim() ? value.id : `vocab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    term,
+    sourceText: String(value.sourceText || term).replace(/\r\n?/g, '\n').trim(),
+    translatedText: String(value.translatedText || '').replace(/\r\n?/g, '\n').trim(),
+    pageTitle: String(value.pageTitle || '').trim(),
+    pageUrl: /^https?:\/\//i.test(String(value.pageUrl || '')) ? String(value.pageUrl).trim() : '',
+    createdAt: Number.isFinite(Number(value.createdAt)) ? Number(value.createdAt) : Date.now(),
+    status: value.status === 'mastered' ? 'mastered' : 'pending'
+  };
+}
+
+function exportVocabularyBackup() {
+  const payload = {
+    format: VOCABULARY_BACKUP_FORMAT,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    items: vocabularyItems.map(({ readerSourceId, ...item }) => ({ ...item }))
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `anwara-vocabulary-${stamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setHistoryStatus(`已导出 ${vocabularyItems.length} 条词汇备份`, 'ok');
+}
+
+async function importVocabularyBackup(file) {
+  if (!file) return;
+  if (file.size > MAX_VOCABULARY_BACKUP_BYTES) {
+    setVocabularyImportFeedback('词汇备份文件超过 2 MB，未导入', 'err');
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    setVocabularyImportFeedback('词汇备份不是有效 JSON，未导入', 'err');
+    return;
+  }
+  if (parsed?.format !== VOCABULARY_BACKUP_FORMAT || !Array.isArray(parsed.items)) {
+    setVocabularyImportFeedback('这不是 Anwara Translator 词汇备份，未导入', 'err');
+    return;
+  }
+  const seen = new Set(vocabularyItems.map(getVocabularyBackupKey));
+  const additions = [];
+  let duplicates = 0;
+  let invalid = 0;
+  for (const rawItem of parsed.items) {
+    const item = normalizeVocabularyBackupItem(rawItem);
+    if (!item) { invalid += 1; continue; }
+    const key = getVocabularyBackupKey(item);
+    if (seen.has(key)) { duplicates += 1; continue; }
+    seen.add(key);
+    additions.push(item);
+  }
+  if (!additions.length) {
+    setVocabularyImportFeedback(`导入完成：0 条新增；跳过 ${duplicates} 条重复、${invalid} 条无效记录`, 'ok');
+    return;
+  }
+  const approved = window.confirm(`导入词汇备份？\n新增 ${additions.length} 条，跳过 ${duplicates} 条重复、${invalid} 条无效记录。\n现有词汇不会被覆盖。`);
+  if (!approved) return;
+  const previous = vocabularyItems;
+  vocabularyItems = [...additions, ...vocabularyItems]
+    .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
+    .slice(0, VOCABULARY_LIMIT);
+  try {
+    await persistArchiveState({ preserveLimit: true });
+    setVocabularyImportFeedback(`已导入 ${additions.length} 条词汇；跳过 ${duplicates} 条重复`, 'ok');
+  } catch (error) {
+    vocabularyItems = previous;
+    renderHistoryList({ preserveLimit: true });
+    setVocabularyImportFeedback('导入词汇失败：' + String(error?.message || error || ''), 'err');
+  }
 }
 
 function createHistoryButton(label, action, id) {
@@ -622,6 +799,60 @@ function createReadingShelfCard(item) {
   return card;
 }
 
+function createVocabularyCard(item) {
+  const card = document.createElement('article');
+  card.className = 'history-card vocabulary-card';
+
+  const term = document.createElement('strong');
+  term.className = 'vocabulary-card-term';
+  term.textContent = item.term || uiMessage('vocabularyUntitled', '未命名词汇');
+  term.title = term.textContent;
+
+  const sourceDetails = document.createElement('details');
+  sourceDetails.className = 'vocabulary-card-context';
+  const sourceSummary = document.createElement('summary');
+  sourceSummary.textContent = '原文上下文';
+  const source = document.createElement('div');
+  source.className = 'vocabulary-card-source';
+  source.textContent = item.sourceText || item.term || uiMessage('vocabularyUntitled', '未命名词汇');
+  source.title = item.sourceText || item.term || '';
+  sourceDetails.append(sourceSummary, source);
+
+  const sourceNormalized = String(item.sourceText || '').replace(/\s+/g, ' ').trim();
+  const translatedNormalized = String(item.translatedText || '').replace(/\s+/g, ' ').trim();
+  const hasDistinctTranslation = Boolean(translatedNormalized && translatedNormalized !== sourceNormalized);
+  const translated = document.createElement('div');
+  translated.className = 'vocabulary-card-translated';
+  translated.textContent = hasDistinctTranslation ? truncateHistoryPreview(item.translatedText) : '';
+  translated.title = hasDistinctTranslation ? item.translatedText : '';
+  translated.hidden = !hasDistinctTranslation;
+
+  const meta = document.createElement('div');
+  meta.className = 'vocabulary-card-meta';
+  meta.textContent = `${formatHistoryTime(item.createdAt)} · ${item.pageTitle || item.pageUrl || uiMessage('vocabularyNoSource', '未命名来源')}`;
+  meta.title = item.pageTitle || item.pageUrl || '';
+
+  const actions = document.createElement('div');
+  actions.className = 'history-card-actions vocabulary-card-actions';
+  const statusButton = createHistoryButton(item.status === 'mastered' ? '已掌握' : '待看', 'vocabulary-status', item.id);
+  statusButton.classList.add('vocabulary-status-btn', item.status === 'mastered' ? 'is-mastered' : 'is-pending');
+  statusButton.title = item.status === 'mastered' ? '标为待看' : '标为已掌握';
+  const hasWebSource = /^https?:\/\//i.test(String(item.pageUrl || ''));
+  const readerSource = getVocabularyReaderSource(item);
+  const sourceButton = createHistoryButton(item.readerSourceId ? '打开阅读' : '打开来源', 'source', item.id);
+  sourceButton.disabled = !hasWebSource && !readerSource;
+  sourceButton.title = hasWebSource
+    ? '打开原网页'
+    : readerSource
+      ? '打开已保留的本地阅读'
+      : item.readerSourceId
+        ? '将原文加入阅读区后即可从这里回读'
+        : '这条词汇没有可打开的网页来源';
+  actions.append(statusButton, sourceButton, createHistoryButton('删除', 'delete', item.id));
+  card.append(term, translated, sourceDetails, meta, actions);
+  return card;
+}
+
 function syncHistorySelectionControls() {
   if (!historySelectAllBtn) return;
   const selections = Array.from(historyList?.querySelectorAll('.history-select') || []);
@@ -652,6 +883,10 @@ function renderHistoryList(options = {}) {
   for (const item of itemsToRender) {
     if (activeView === 'reading') {
       fragment.appendChild(createReadingShelfCard(item));
+      continue;
+    }
+    if (activeView === 'vocabulary') {
+      fragment.appendChild(createVocabularyCard(item));
       continue;
     }
     const card = document.createElement('div');
@@ -719,6 +954,14 @@ function isInReadingArea(id) {
   return Boolean(id) && readingItems.some((item) => item?.id === id);
 }
 
+function getVocabularyReaderSource(item) {
+  const sourceId = String(item?.readerSourceId || '').trim();
+  if (!sourceId) return null;
+  return readingItems.find((entry) => entry?.id === sourceId)
+    || historyItems.find((entry) => entry?.id === sourceId)
+    || null;
+}
+
 function isImportedMarkdownReaderItem(item) {
   return item?.readerSourceKind === 'imported-markdown' || String(item?.id || '').startsWith('markdown-import-');
 }
@@ -757,9 +1000,11 @@ async function loadHistoryState(options = {}) {
         READING_KEY,
         READER_POSITIONS_KEY,
         HISTORY_ENABLED_KEY,
-        AUTO_READING_KEY
+        AUTO_READING_KEY,
+        VOCABULARY_KEY
       ]);
       historyItems = normalizeStoredItems(result[HISTORY_KEY]);
+      vocabularyItems = normalizeStoredItems(result[VOCABULARY_KEY]).slice(0, VOCABULARY_LIMIT);
       const hasReadingStore = Array.isArray(result[READING_KEY]);
       readingItems = hasReadingStore
         ? normalizeStoredItems(result[READING_KEY])
@@ -777,6 +1022,7 @@ async function loadHistoryState(options = {}) {
     } catch (e) {
       historyItems = [];
       readingItems = [];
+      vocabularyItems = [];
       historyLoaded = true;
       renderHistoryList();
       setHistoryStatus('历史记录读取失败', 'err');
@@ -872,21 +1118,54 @@ historyList?.addEventListener('click', async (event) => {
   const id = button.dataset.id;
   const index = historyItems.findIndex((item) => item.id === id);
   const readingIndex = readingItems.findIndex((item) => item.id === id);
-  if (index < 0 && readingIndex < 0) return;
+  const vocabularyIndex = vocabularyItems.findIndex((item) => item.id === id);
+  if (index < 0 && readingIndex < 0 && vocabularyIndex < 0) return;
   if (button.dataset.action === 'delete') {
     const view = getActiveArchiveView();
     if (view === 'reading' && readingIndex < 0) return;
-    if (view !== 'reading' && index < 0) return;
+    if (view === 'vocabulary' && vocabularyIndex < 0) return;
+    if (view === 'all' && index < 0) return;
     armArchiveUndo('删除记录');
     if (view === 'reading') readingItems.splice(readingIndex, 1);
+    else if (view === 'vocabulary') vocabularyItems.splice(vocabularyIndex, 1);
     else historyItems.splice(index, 1);
     try {
       await persistArchiveState();
-      setHistoryStatus(`已删除 1 条${view === 'reading' ? '阅读区' : '历史翻译'}记录，可在 8 秒内撤销`, 'ok');
+      setHistoryStatus(`已删除 1 条${view === 'reading' ? '阅读区' : view === 'vocabulary' ? '词汇' : '历史翻译'}记录，可在 8 秒内撤销`, 'ok');
     } catch (error) {
       await restoreArchiveUndo();
       setHistoryStatus('删除失败：' + String(error?.message || error || ''), 'err');
     }
+  } else if (button.dataset.action === 'vocabulary-status') {
+    if (vocabularyIndex < 0) return;
+    const current = vocabularyItems[vocabularyIndex];
+    const nextStatus = current.status === 'mastered' ? 'pending' : 'mastered';
+    vocabularyItems[vocabularyIndex] = { ...current, status: nextStatus, updatedAt: Date.now() };
+    try {
+      await persistArchiveState({ preserveLimit: true });
+      setHistoryStatus(nextStatus === 'mastered' ? '已标为已掌握' : '已标为待看', 'ok');
+    } catch (error) {
+      vocabularyItems[vocabularyIndex] = current;
+      renderHistoryList({ preserveLimit: true });
+      setHistoryStatus('更新词汇状态失败：' + String(error?.message || error || ''), 'err');
+    }
+  } else if (button.dataset.action === 'source') {
+    const item = vocabularyItems[vocabularyIndex];
+    if (!item) return;
+    if (/^https?:\/\//i.test(String(item.pageUrl || ''))) {
+      try {
+        await chrome.tabs.create({ url: item.pageUrl });
+      } catch (error) {
+        setHistoryStatus('无法打开来源：' + String(error?.message || error || ''), 'err');
+      }
+      return;
+    }
+    const readerSource = getVocabularyReaderSource(item);
+    if (!readerSource) {
+      setHistoryStatus('原文尚未加入阅读区，无法打开。', '');
+      return;
+    }
+    openReader(readerSource, 'reading');
   } else if (button.dataset.action === 'reading') {
     const item = historyItems[index] || readingItems.find((entry) => entry.id === id);
     if (!item) return;
@@ -929,6 +1208,22 @@ readerFontIncreaseBtn?.addEventListener('click', () => adjustReaderFont(1));
 historyFromDate?.addEventListener('change', () => { resetDateDeleteConfirmation(); renderHistoryList(); });
 historyToDate?.addEventListener('change', () => { resetDateDeleteConfirmation(); renderHistoryList(); });
 historySearchInput?.addEventListener('input', renderHistoryList);
+exportVocabularyBtn?.addEventListener('click', exportVocabularyBackup);
+importVocabularyBtn?.addEventListener('click', () => openLocalFilePicker(importVocabularyFileInput));
+importVocabularyFileInput?.addEventListener('change', async () => {
+  const [file] = Array.from(importVocabularyFileInput.files || []);
+  importVocabularyFileInput.value = '';
+  clearLocalFilePickerState();
+  await importVocabularyBackup(file);
+});
+importVocabularyFileInput?.addEventListener('cancel', clearLocalFilePickerState);
+vocabularyStatusFilterButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    vocabularyStatusFilter = ['all', 'pending', 'mastered'].includes(button.dataset.vocabularyStatus) ? button.dataset.vocabularyStatus : 'all';
+    syncArchiveTabs(getActiveArchiveView());
+    renderHistoryList();
+  });
+});
 historyEngineFilter?.addEventListener('change', renderHistoryList);
 historySiteFilter?.addEventListener('input', renderHistoryList);
 historyDedupeToggle?.addEventListener('change', renderHistoryList);
@@ -942,6 +1237,10 @@ historySelectAllBtn?.addEventListener('click', () => {
   syncHistorySelectionControls();
 });
 deleteSelectedHistoryBtn?.addEventListener('click', async () => {
+  if (getActiveArchiveView() === 'vocabulary') {
+    setHistoryStatus('词汇支持单条删除或清空全部。', 'note');
+    return;
+  }
   const selected = getSelectedHistoryIds();
   if (!selected.size) {
     setHistoryStatus('请先选择要删除的记录', 'err');
@@ -962,6 +1261,10 @@ deleteSelectedHistoryBtn?.addEventListener('click', async () => {
   }
 });
 deleteDateHistoryBtn?.addEventListener('click', async () => {
+  if (getActiveArchiveView() === 'vocabulary') {
+    setHistoryStatus('词汇不按日期批量删除，请使用单条删除或清空全部。', 'note');
+    return;
+  }
   const from = historyFromDate?.value ? new Date(`${historyFromDate.value}T00:00:00`).getTime() : null;
   const to = historyToDate?.value ? new Date(`${historyToDate.value}T23:59:59.999`).getTime() : null;
   if (from !== null && to !== null && from > to) {
@@ -1025,9 +1328,12 @@ clearHistoryBtn?.addEventListener('click', async () => {
   try {
     const clearPatch = view === 'reading'
       ? { [READING_KEY]: [] }
-      : { [HISTORY_KEY]: [] };
+      : view === 'vocabulary'
+        ? { [VOCABULARY_KEY]: [] }
+        : { [HISTORY_KEY]: [] };
     await chrome.storage.local.set(clearPatch);
     if (view === 'reading') readingItems = [];
+    else if (view === 'vocabulary') vocabularyItems = [];
     else historyItems = [];
     renderHistoryList();
     setHistoryStatus(`${getActiveArchiveLabel()}已清空，可在 8 秒内撤销`, 'ok');
@@ -1301,11 +1607,12 @@ inputEl.addEventListener("input", () => {
 });
 openImportedReaderBtn?.addEventListener('click', () => void openImportedMarkdownReader());
 importTextBtn?.addEventListener('click', () => {
-  importTextFileInput?.click();
+  openLocalFilePicker(importTextFileInput);
 });
 importTextFileInput?.addEventListener('change', async () => {
   const file = importTextFileInput.files?.[0];
   importTextFileInput.value = '';
+  clearLocalFilePickerState();
   if (!file) return;
 
   const supportedType = /\.(?:txt|md|markdown)$/i.test(file.name) || /^text\/(?:plain|markdown)$/i.test(file.type || '');
@@ -1344,6 +1651,7 @@ importTextFileInput?.addEventListener('change', async () => {
     if (importTextBtn) importTextBtn.disabled = false;
   }
 });
+importTextFileInput?.addEventListener('cancel', clearLocalFilePickerState);
 clearInputBtn?.addEventListener('click', () => {
   inputEl.value = '';
   setImportedMarkdownDocument(null);
@@ -3053,6 +3361,7 @@ swapBtn?.addEventListener("click", () => {
       MANUAL_SOURCE_LANGUAGE_KEY,
       SELECTION_SHOW_BILINGUAL_KEY,
       SELECTION_SHOW_SOURCE_KEY,
+      CONTEXT_VOCABULARY_ENABLED_KEY,
       SAME_LANGUAGE_MODE_KEY
     ]);
     const autoEnabled = !!s.autoTranslateEnabled;
@@ -3060,6 +3369,7 @@ swapBtn?.addEventListener("click", () => {
     const floatingEnabled = !!s.floatingButtonEnabled;
     const showBilingual = s[SELECTION_SHOW_BILINGUAL_KEY] !== false;
     const showSource = s[SELECTION_SHOW_SOURCE_KEY] !== false;
+    const contextVocabularyEnabled = s[CONTEXT_VOCABULARY_ENABLED_KEY] !== false;
     const sameLanguageMode = s[SAME_LANGUAGE_MODE_KEY] === 'translate' ? 'translate' : 'skip';
 
     if (autoToggle) {
@@ -3081,6 +3391,10 @@ swapBtn?.addEventListener("click", () => {
     if (selectionSourceToggle) {
       selectionSourceToggle.checked = showSource;
       updateToggleStatus(selectionSourceToggle, selectionSourceToggleStatus, showSource);
+    }
+    if (contextVocabularyToggle) {
+      contextVocabularyToggle.checked = contextVocabularyEnabled;
+      updateToggleStatus(contextVocabularyToggle, contextVocabularyToggleStatus, contextVocabularyEnabled);
     }
     if (sameLanguageModeSelect) sameLanguageModeSelect.value = sameLanguageMode;
     if (sameLanguageModeStatus) sameLanguageModeStatus.textContent = sameLanguageMode === 'translate'
@@ -3164,6 +3478,20 @@ async function ensureSelectionTranslationContentScript(tabId) {
   if (status?.version !== CONTENT_SCRIPT_VERSION) throw new Error('当前网页仍在运行旧版划词逻辑，请刷新页面后再开启。');
   return status;
 }
+
+contextVocabularyToggle?.addEventListener('change', async (event) => {
+  const enabled = !!event.target.checked;
+  try {
+    await chrome.storage.sync.set({ [CONTEXT_VOCABULARY_ENABLED_KEY]: enabled });
+    updateToggleStatus(contextVocabularyToggle, contextVocabularyToggleStatus, enabled);
+    setStatus(enabled ? '已开启：右键添加词汇' : '已关闭：右键添加词汇', enabled ? 'ok' : '');
+  } catch (error) {
+    event.target.checked = !enabled;
+    updateToggleStatus(contextVocabularyToggle, contextVocabularyToggleStatus, !enabled);
+    setStatus('右键词汇快捷设置失败：' + String(error?.message || error || ''), 'err');
+  }
+});
+
 
 selectionToggle?.addEventListener('change', async (e) => {
   const enabled = !!e.target.checked;
@@ -3699,6 +4027,11 @@ prepareSensitiveInputPrivacy();
 
 const fullConsoleParams = new URLSearchParams(location.search);
 const isFullConsole = fullConsoleParams.get('mode') === 'full';
+if (!isFullConsole) {
+  window.addEventListener('blur', () => {
+    if (!localFilePickerOpen) window.close();
+  });
+}
 const fullConsoleSourceTabId = Number(fullConsoleParams.get('sourceTabId'));
 const fullConsoleInitialTab = fullConsoleParams.get('tab');
 const fullConsoleOpenPanelSizeTuner = fullConsoleParams.get('sizeTuner') === '1';
@@ -3835,6 +4168,7 @@ function prepareFullConsoleArchiveLayout(workspace) {
   const query = tools?.querySelector('.history-query-row');
   const filterRow = tools?.querySelector('.history-filter-row');
   const preferences = tools?.querySelector('.history-tool-options');
+  const vocabularyStatusFilter = historySection.querySelector('#vocabularyStatusFilter');
   const searchInput = query?.querySelector('#historySearchInput');
   const engineFilter = query?.querySelector('#historyEngineFilter');
   const siteFilter = filterRow?.querySelector('#historySiteFilter');
@@ -3866,6 +4200,7 @@ function prepareFullConsoleArchiveLayout(workspace) {
     tools.prepend(engineRow);
   }
   if (dedupeOption && preferences) preferences.appendChild(dedupeOption);
+  if (vocabularyStatusFilter) tools.insertBefore(vocabularyStatusFilter, tools.querySelector('.history-bulk-row'));
   if (siteFilter) siteFilter.value = '';
   query?.remove();
   filterRow?.remove();
@@ -4088,7 +4423,7 @@ void (async () => {
     // Keep the small popup usable while an empty or damaged archive is being recovered.
     setConsoleTab('translation', false);
     await loadHistoryState();
-    if (historyItems.length || readingItems.length) setConsoleTab('archive', false);
+    if (historyItems.length || readingItems.length || vocabularyItems.length) setConsoleTab('archive', false);
   } catch {
     setConsoleTab('translation', false);
   }

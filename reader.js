@@ -3,6 +3,8 @@ const READING_KEY = 'translatorReadingArea';
 const VARIANTS_KEY = 'translatorTranslationVariants';
 const READER_PREFS_KEY = 'translatorReaderPreferences';
 const READER_DRAFTS_KEY = 'translatorReaderDrafts';
+const VOCABULARY_KEY = 'translatorVocabulary';
+const VOCABULARY_LIMIT = 1000;
 const VALID_MODES = new Set(['dual', 'source', 'translated']);
 const VALID_THEMES = new Set(['paper', 'snow', 'sepia', 'graphite', 'midnight', 'forest']);
 const VALID_FONTS = new Set(['serif', 'sans', 'kai', 'system']);
@@ -27,6 +29,7 @@ const sourceLinkEl = document.getElementById('sourceLink');
 const metaEl = document.getElementById('readerMeta');
 const statusEl = document.getElementById('readerStatus');
 const contentEl = document.getElementById('readerContent');
+const saveVocabularyBtn = document.getElementById('saveVocabularyBtn');
 const fontSizeLabelEl = document.getElementById('fontSizeLabel');
 const tocToggleBtn = document.getElementById('tocToggleBtn');
 const tocCloseBtn = document.getElementById('tocCloseBtn');
@@ -68,6 +71,7 @@ let readerSearchMatches = [];
 let readerSearchIndex = -1;
 let readerPositionTimer = null;
 let readerReadingBusy = false;
+let vocabularyFeedbackTimer = null;
 const READER_PROVIDER_REQUIREMENTS = {
   google: { needsKey: true }, microsoft: { needsKey: true }, deepl: { needsKey: true }, deeplx: { allowHttp: true },
   xiaoniu: { needsKey: true }, youdao: { credentials: true }, tencent: { credentials: true },
@@ -102,6 +106,100 @@ function normalizeText(value) {
 
 function languageLabel(code) {
   return uiText(LANGUAGE_LABELS[code] || code || '未知语言');
+}
+
+function getReaderSelectionTerm() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return '';
+  const anchor = selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+    ? selection.anchorNode
+    : selection.anchorNode?.parentElement;
+  const focus = selection.focusNode?.nodeType === Node.ELEMENT_NODE
+    ? selection.focusNode
+    : selection.focusNode?.parentElement;
+  if (!anchor || !focus || !contentEl?.contains(anchor) || !contentEl.contains(focus)) return '';
+  return normalizeText(selection.toString());
+}
+
+function getVocabularySelectionContext(term) {
+  const selection = window.getSelection();
+  const selectedElement = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+    ? selection.anchorNode
+    : selection?.anchorNode?.parentElement;
+  const container = selectedElement?.closest?.('li, td, blockquote, .reader-structure-block, .reader-pair, .reader-single')
+    || selectedElement?.closest?.('.reader-content');
+  const sourceText = normalizeText(container?.querySelector?.('.reader-source')?.innerText || term);
+  const translatedText = normalizeText(container?.querySelector?.('.reader-translated')?.innerText || '');
+  return { sourceText, translatedText };
+}
+
+function getVocabularyDedupKey(entry) {
+  return [entry?.term, entry?.sourceText, entry?.pageUrl || entry?.pageTitle]
+    .map((value) => normalizeText(value).replace(/\s+/g, ' ').toLocaleLowerCase())
+    .join('␟');
+}
+
+function updateSaveVocabularyButton() {
+  if (!saveVocabularyBtn) return;
+  const term = getReaderSelectionTerm();
+  saveVocabularyBtn.disabled = !term;
+  saveVocabularyBtn.title = term
+    ? uiMessage('vocabularySaveTitle', `收藏“${term.slice(0, 60)}”`, [term.slice(0, 60)])
+    : uiMessage('selectReaderTextFirst', '先在正文中选中词语或句子');
+}
+
+function flashVocabularyButton(label, kind = '') {
+  if (!saveVocabularyBtn) return;
+  if (vocabularyFeedbackTimer) window.clearTimeout(vocabularyFeedbackTimer);
+  saveVocabularyBtn.textContent = label;
+  saveVocabularyBtn.disabled = true;
+  saveVocabularyBtn.dataset.feedback = kind;
+  vocabularyFeedbackTimer = window.setTimeout(() => {
+    delete saveVocabularyBtn.dataset.feedback;
+    saveVocabularyBtn.textContent = uiMessage('saveSelected', '收藏选中');
+    updateSaveVocabularyButton();
+  }, 1400);
+}
+
+async function saveVocabularySelection() {
+  const term = getReaderSelectionTerm();
+  if (!term || !state.item) {
+    updateSaveVocabularyButton();
+    return;
+  }
+  const context = getVocabularySelectionContext(term);
+  const localDocumentSource = isImportedMarkdownReaderItem(state.item);
+  const entry = {
+    id: `vocab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    term,
+    sourceText: context.sourceText || term,
+    translatedText: context.translatedText,
+    pageTitle: state.item.pageTitle || '',
+    pageUrl: state.item.pageUrl || '',
+    readerSourceId: localDocumentSource ? state.item.id : '',
+    createdAt: Date.now()
+  };
+  try {
+    const result = await chrome.storage.local.get([VOCABULARY_KEY]);
+    const vocabulary = Array.isArray(result[VOCABULARY_KEY]) ? result[VOCABULARY_KEY].filter((item) => item && typeof item === 'object' && item.id) : [];
+    if (vocabulary.some((item) => getVocabularyDedupKey(item) === getVocabularyDedupKey(entry))) {
+      setStatus(uiMessage('vocabularyDuplicate', '这条词汇已经收藏过了。'), 'note');
+      flashVocabularyButton(uiMessage('vocabularyDuplicateShort', '已存在'), 'note');
+      return;
+    }
+    vocabulary.unshift(entry);
+    await chrome.storage.local.set({ [VOCABULARY_KEY]: vocabulary.slice(0, VOCABULARY_LIMIT) });
+    setStatus(
+      localDocumentSource && state.item.inReadingArea !== true
+        ? uiMessage('vocabularySavedNeedsReadingSource', '已收藏到词汇。将本文档加入阅读区后，可从词汇回读原文。')
+        : uiMessage('vocabularySaved', '已收藏到词汇。'),
+      'ok'
+    );
+    flashVocabularyButton(uiMessage('vocabularySavedShort', '已收藏'), 'ok');
+  } catch (error) {
+    setStatus(uiMessage('vocabularySaveFailed', `收藏词汇失败：${String(error?.message || error || '')}`, [String(error?.message || error || '')]), 'err');
+    flashVocabularyButton(uiMessage('vocabularySaveFailedShort', '失败'), 'err');
+  }
 }
 
 function normalizeReaderLanguage(code) {
@@ -1140,6 +1238,7 @@ async function refreshRetranslateOptions() {
 function renderContent() {
   if (!contentEl) return;
   contentEl.textContent = '';
+  updateSaveVocabularyButton();
   renderTableOfContents([]);
   if (!state.item) {
     const empty = document.createElement('div');
@@ -1161,6 +1260,7 @@ function renderContent() {
     });
     renderTableOfContents(structuredBlocks);
     applyReaderSearch();
+    updateSaveVocabularyButton();
     return;
   }
 
@@ -1188,6 +1288,7 @@ function renderContent() {
     contentEl.appendChild(block);
   });
   applyReaderSearch();
+  updateSaveVocabularyButton();
 }
 
 function renderMeta() {
@@ -1352,6 +1453,10 @@ document.getElementById('fontIncreaseBtn')?.addEventListener('click', () => {
   savePreferences();
 });
 document.getElementById('copyTranslatedBtn')?.addEventListener('click', copyTranslated);
+saveVocabularyBtn?.addEventListener('mousedown', (event) => event.preventDefault());
+saveVocabularyBtn?.addEventListener('click', () => void saveVocabularySelection());
+contentEl?.addEventListener('pointerup', () => requestAnimationFrame(updateSaveVocabularyButton));
+document.addEventListener('selectionchange', updateSaveVocabularyButton);
 readerReadingBtn?.addEventListener('click', () => void toggleReaderReadingArea());
 document.getElementById('closeReaderBtn')?.addEventListener('click', closeReader);
 retranslateBtn?.addEventListener('click', async () => {
