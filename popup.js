@@ -724,7 +724,7 @@ function isImportedMarkdownReaderItem(item) {
 }
 
 async function preserveImportedReaderSessionDraft(item) {
-  if (!isImportedMarkdownReaderItem(item) || historyItems.some((entry) => entry?.id === item.id)) return;
+  if (!isImportedMarkdownReaderItem(item) || historyItems.some((entry) => entry?.id === item.id)) return false;
   if (!chrome.storage.session) throw new Error('当前浏览器不支持会话草稿，无法安全移出导入文档');
   const [sessionResult, localResult] = await Promise.all([
     chrome.storage.session.get([READER_DRAFTS_KEY]),
@@ -744,6 +744,7 @@ async function preserveImportedReaderSessionDraft(item) {
     updatedAt: Date.now()
   };
   await chrome.storage.session.set({ [READER_DRAFTS_KEY]: drafts });
+  return true;
 }
 
 async function loadHistoryState(options = {}) {
@@ -892,10 +893,12 @@ historyList?.addEventListener('click', async (event) => {
     if (isInReadingArea(id)) {
       const previousReadingItems = readingItems;
       try {
-        await preserveImportedReaderSessionDraft(item);
+        const preservedSessionDraft = await preserveImportedReaderSessionDraft(item);
         readingItems = readingItems.filter((entry) => entry.id !== id);
         await saveReadingItems();
-        setHistoryStatus('已移出阅读区', 'ok');
+        setHistoryStatus(preservedSessionDraft
+          ? '已移出阅读区；当前打开的导入阅读仍可在本次浏览器会话中刷新。'
+          : '已移出阅读区', 'ok');
       } catch (error) {
         readingItems = previousReadingItems;
         if (historyLoaded) renderHistoryList();

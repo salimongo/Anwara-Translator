@@ -781,7 +781,9 @@ async function toggleReaderReadingArea() {
     } else {
       state.item = transientDraft || { ...persistedItem, translationVariants: translationVariants || {} };
     }
-    setStatus(next ? '已加入阅读区。' : '已移出阅读区。', 'ok');
+    setStatus(next
+      ? '已加入阅读区。'
+      : (transientDraft ? '已移出阅读区；当前阅读会话仍可刷新，关闭浏览器会话后不再保留。' : '已移出阅读区。'), 'ok');
   } catch (error) {
     setStatus('阅读区保存失败：' + String(error?.message || error || ''), 'err');
   } finally {
