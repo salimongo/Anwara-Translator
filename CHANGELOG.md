@@ -2,6 +2,20 @@
 
 All notable user-visible changes are recorded here. Dates use local workspace time.
 
+## Unreleased — 2026-07-22
+
+### Added
+
+- The manual translation source area can import UTF-8 `.txt` and `.md` files into the existing text input. Imported content keeps its line breaks and stays under the user's current source-language, target-language, and engine choices until they explicitly start translation.
+
+### Changed
+
+- Chinese-target page, selection, and structured-reader translations now apply the same conservative punctuation normalization as manual translation before results enter the translation cache.
+
+### Safety
+
+- Text import rejects unsupported file types, files over 2 MB, documents over 250,000 characters, empty files, and read failures. Imported text is not auto-translated or auto-saved.
+
 ## Unreleased — 2026-07-20
 
 ### Added

@@ -14,7 +14,11 @@ const targetSelect = document.getElementById("targetLang");
 const inputEl = document.getElementById("inputText");
 const outputEl = document.getElementById("output");
 const charCountEl = document.getElementById("charCount");
+const importTextBtn = document.getElementById('importTextBtn');
+const importTextFileInput = document.getElementById('importTextFileInput');
 const clearInputBtn = document.getElementById('clearInputBtn');
+const MAX_IMPORTED_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_IMPORTED_TEXT_CHARS = 250000;
 
 const statusEl = document.getElementById("status");
 const translateBtn = document.getElementById("translateBtn");
@@ -1008,6 +1012,46 @@ function updateCharCount() {
 }
 
 inputEl.addEventListener("input", updateCharCount);
+importTextBtn?.addEventListener('click', () => {
+  importTextFileInput?.click();
+});
+importTextFileInput?.addEventListener('change', async () => {
+  const file = importTextFileInput.files?.[0];
+  importTextFileInput.value = '';
+  if (!file) return;
+
+  const supportedType = /\.(?:txt|md|markdown)$/i.test(file.name) || /^text\/(?:plain|markdown)$/i.test(file.type || '');
+  if (!supportedType) {
+    setStatus(uiMessage('importUnsupportedFile', '请选择 .txt 或 .md 文本文件。'), 'err');
+    return;
+  }
+  if (file.size > MAX_IMPORTED_FILE_BYTES) {
+    setStatus(uiMessage('importFileTooLarge', '文件过大，导入上限为 2 MB / 250,000 字符。'), 'err');
+    return;
+  }
+
+  if (importTextBtn) importTextBtn.disabled = true;
+  try {
+    const text = (await file.text()).replace(/^\uFEFF/, '');
+    if (!text.trim()) {
+      setStatus(uiMessage('importFileEmpty', '文件没有可翻译的文本。'), 'err');
+      return;
+    }
+    if (text.length > MAX_IMPORTED_TEXT_CHARS) {
+      setStatus(uiMessage('importFileTooLarge', '文件过大，导入上限为 2 MB / 250,000 字符。'), 'err');
+      return;
+    }
+
+    inputEl.value = text;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.focus();
+    setStatus(uiMessage('importFileLoaded', `已导入 ${file.name}（${text.length} 字符）`, [file.name, String(text.length)]), 'ok');
+  } catch {
+    setStatus(uiMessage('importFileFailed', '文件读取失败，请重试。'), 'err');
+  } finally {
+    if (importTextBtn) importTextBtn.disabled = false;
+  }
+});
 clearInputBtn?.addEventListener('click', () => {
   inputEl.value = '';
   updateCharCount();

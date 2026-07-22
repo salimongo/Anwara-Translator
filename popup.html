@@ -956,6 +956,16 @@
         padding: 6px 8px !important;
         font-size: 11px !important;
       }
+      body[data-active-tab="settings"] .provider-profile-grid > .sensitive-input-shell {
+        grid-column: 2;
+        min-width: 0;
+      }
+      body[data-active-tab="settings"] .provider-profile-grid > .sensitive-input-shell > input {
+        width: 100% !important;
+        min-height: 32px !important;
+        padding: 6px 38px 6px 8px !important;
+        font-size: 11px !important;
+      }
       body[data-active-tab="settings"] .provider-profile-grid > textarea {
         min-height: 68px !important;
         resize: vertical;
@@ -2910,6 +2920,13 @@
             输入文本
           </label>
           <div style="display:flex;align-items:center;gap:7px;">
+            <button id="importTextBtn" class="icon-clear-btn" type="button" title="导入 TXT / Markdown" aria-label="导入 TXT / Markdown">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 16V4"/>
+                <path d="m7 9 5-5 5 5"/>
+                <path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
+              </svg>
+            </button>
             <button id="clearInputBtn" class="icon-clear-btn" type="button" title="清空输入" aria-label="清空输入" disabled>
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18"/>
@@ -2918,6 +2935,7 @@
             <span id="charCount" class="char-count" aria-live="polite">字数：0</span>
           </div>
         </div>
+        <input id="importTextFileInput" type="file" accept=".txt,.md,text/plain,text/markdown" hidden>
         <div style="position:relative;">
           <textarea id="inputText" placeholder="请输入需要翻译的文本..."></textarea>
           <div style="position:absolute;bottom:12px;right:12px;opacity:0.3;pointer-events:none;">

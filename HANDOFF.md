@@ -13,6 +13,13 @@ This pass improves recoverability, reading usability, and local provider-credent
 - **Static evidence:** `node --check` passed for `contentScript.js`, `popup.js`, and `background.js`; `git diff --check` passed; file-extracted normalizer checks passed for simplified/traditional Chinese, English pass-through, URL/decimal/citation preservation, and normalize-before-cache order.
 - **Live acceptance passed by user on 2026-07-22:** after reloading the extension and refreshing the webpage, the Chinese-target translation path behaved correctly. Keep cache reuse as a normal regression check when changing cache keys or provider routing later.
 
+## Document import v1 — 2026-07-22
+
+- **Implemented:** the manual-translation source area now has an icon-only `.txt` / `.md` import control. It loads UTF-8 text into the existing input field without auto-translating, changing language settings, writing history, or creating a second reader model.
+- **Guardrails:** only text or Markdown file types are accepted; files over 2 MB, documents over 250,000 characters, empty files, and read failures stay out of the input and display an inline status. A UTF-8 BOM is removed before import; line breaks are otherwise preserved.
+- **Static evidence:** `node --check popup.js`, `node --check i18n.js`, both locale JSON parse checks, `git diff --check`, and static HTML/JS/i18n wiring checks passed.
+- **Live acceptance passed by user on 2026-07-22:** `.txt` / `.md` import works from the existing translation surface. The popup's sensitive endpoint / Key fields also now align with ordinary service inputs after the runtime wrapper receives the missing popup-grid rule.
+
 ## Pause checkpoint — 2026-07-21
 
 - **Last pushed baseline:** `51edece` (`feat: refine full console and panel sizing`) is present on `origin/main`. The toolbar-popup size-tuner fallback was user-confirmed in Vivaldi before this pause.
