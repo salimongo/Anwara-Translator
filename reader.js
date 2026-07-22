@@ -714,6 +714,10 @@ async function persistReaderItem() {
   }
 }
 
+function isImportedMarkdownReaderItem(item) {
+  return item?.readerSourceKind === 'imported-markdown' || String(item?.id || '').startsWith('markdown-import-');
+}
+
 function updateReaderReadingButton() {
   if (!readerReadingBtn) return;
   const available = Boolean(state.item?.id);
@@ -750,6 +754,10 @@ async function toggleReaderReadingArea() {
     const { translationVariants, readerDraftMode, ...plainItem } = state.item;
     const persistedItem = { ...plainItem, inReadingArea: next };
     const historyIndex = history.findIndex((item) => item?.id === state.item.id);
+    const restoreAsTransientDraft = !next && historyIndex < 0 && isImportedMarkdownReaderItem(state.item);
+    const transientDraft = restoreAsTransientDraft
+      ? { ...plainItem, inReadingArea: false, readerDraftMode: 'transient-reader', translationVariants: translationVariants || {} }
+      : null;
     const nextHistory = historyIndex >= 0
       ? history.map((item) => item?.id === state.item.id ? { ...item, ...persistedItem, inReadingArea: next } : item)
       : history;
@@ -762,9 +770,17 @@ async function toggleReaderReadingArea() {
       variants[state.item.id] = translationVariants;
       patch[VARIANTS_KEY] = variants;
     }
+    if (transientDraft) {
+      state.item = transientDraft;
+      await persistReaderItem();
+    }
     await chrome.storage.local.set(patch);
-    state.item = { ...persistedItem, translationVariants: translationVariants || {} };
-    await removeReaderDraft(state.item.id);
+    if (next) {
+      state.item = { ...persistedItem, translationVariants: translationVariants || {} };
+      await removeReaderDraft(state.item.id);
+    } else {
+      state.item = transientDraft || { ...persistedItem, translationVariants: translationVariants || {} };
+    }
     setStatus(next ? '已加入阅读区。' : '已移出阅读区。', 'ok');
   } catch (error) {
     setStatus('阅读区保存失败：' + String(error?.message || error || ''), 'err');

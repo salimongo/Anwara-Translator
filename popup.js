@@ -193,6 +193,7 @@ if (historyUndoBtn && refreshHistoryBtn?.parentElement) {
 const HISTORY_KEY = 'translatorHistory';
 const READING_KEY = 'translatorReadingArea';
 const VARIANTS_KEY = 'translatorTranslationVariants';
+const READER_DRAFTS_KEY = 'translatorReaderDrafts';
 const READER_POSITIONS_KEY = 'translatorReaderPositions';
 const HISTORY_ENABLED_KEY = 'translatorHistoryEnabled';
 const AUTO_READING_KEY = 'translatorAutoAddToReading';
@@ -718,6 +719,33 @@ function isInReadingArea(id) {
   return Boolean(id) && readingItems.some((item) => item?.id === id);
 }
 
+function isImportedMarkdownReaderItem(item) {
+  return item?.readerSourceKind === 'imported-markdown' || String(item?.id || '').startsWith('markdown-import-');
+}
+
+async function preserveImportedReaderSessionDraft(item) {
+  if (!isImportedMarkdownReaderItem(item) || historyItems.some((entry) => entry?.id === item.id)) return;
+  if (!chrome.storage.session) throw new Error('当前浏览器不支持会话草稿，无法安全移出导入文档');
+  const [sessionResult, localResult] = await Promise.all([
+    chrome.storage.session.get([READER_DRAFTS_KEY]),
+    chrome.storage.local.get([VARIANTS_KEY])
+  ]);
+  const drafts = sessionResult[READER_DRAFTS_KEY] && typeof sessionResult[READER_DRAFTS_KEY] === 'object'
+    ? { ...sessionResult[READER_DRAFTS_KEY] }
+    : {};
+  const variants = localResult[VARIANTS_KEY] && typeof localResult[VARIANTS_KEY] === 'object'
+    ? localResult[VARIANTS_KEY][item.id]
+    : {};
+  drafts[item.id] = {
+    ...item,
+    inReadingArea: false,
+    readerDraftMode: 'transient-reader',
+    translationVariants: variants && typeof variants === 'object' ? variants : (item.translationVariants || {}),
+    updatedAt: Date.now()
+  };
+  await chrome.storage.session.set({ [READER_DRAFTS_KEY]: drafts });
+}
+
 async function loadHistoryState(options = {}) {
   if (historyLoaded && !options.force) return;
   if (historyLoadPromise && !options.force) return historyLoadPromise;
@@ -862,9 +890,17 @@ historyList?.addEventListener('click', async (event) => {
     const item = historyItems[index] || readingItems.find((entry) => entry.id === id);
     if (!item) return;
     if (isInReadingArea(id)) {
-      readingItems = readingItems.filter((entry) => entry.id !== id);
-      await saveReadingItems();
-      setHistoryStatus('已移出阅读区', 'ok');
+      const previousReadingItems = readingItems;
+      try {
+        await preserveImportedReaderSessionDraft(item);
+        readingItems = readingItems.filter((entry) => entry.id !== id);
+        await saveReadingItems();
+        setHistoryStatus('已移出阅读区', 'ok');
+      } catch (error) {
+        readingItems = previousReadingItems;
+        if (historyLoaded) renderHistoryList();
+        setHistoryStatus('移出阅读区失败：' + String(error?.message || error || ''), 'err');
+      }
     } else {
       readingItems = [{ ...item, inReadingArea: true }, ...readingItems.filter((entry) => entry.id !== id)].slice(0, 500);
       await saveReadingItems();
@@ -1197,6 +1233,7 @@ async function openImportedMarkdownReader() {
   const now = Date.now();
   const record = {
     id: `markdown-import-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    readerSourceKind: 'imported-markdown',
     pageTitle,
     pageUrl: '',
     sourceText: document.text,

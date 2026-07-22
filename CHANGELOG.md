@@ -18,6 +18,7 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 
 - Webpage structured reading retains same-page reference targets such as `[1]` instead of silently dropping them during link extraction, so the reader can use its existing citation jump flow.
 - In dual-language reading mode, code blocks whose translated text is identical to their source now render once instead of as duplicate blocks. Source-only and translated-only modes remain unchanged.
+- Removing an imported Markdown document from the reading area, whether from the reader or the console, now restores its active reader as a session draft before deleting the reading-area copy. Refreshing the open reader no longer loses content or silently creates a history record.
 
 ### Safety
 
