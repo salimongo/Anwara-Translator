@@ -1151,6 +1151,13 @@ function cloneImportedMarkdownBlocks(blocks) {
   });
 }
 
+function getImportedMarkdownReaderTitle(document) {
+  const heading = (document?.blocks || []).find((block) => block?.type === 'heading' && Number(block.level) === 1);
+  const headingText = normalizeImportedMarkdownText(heading?.sourceText || '');
+  if (headingText) return headingText;
+  return String(document?.name || '').replace(/\.(?:md|markdown)$/i, '') || uiMessage('markdownUntitled', '未命名 Markdown 文档');
+}
+
 function setImportedMarkdownDocument(document) {
   importedMarkdownDocument = document;
   if (openImportedReaderBtn) openImportedReaderBtn.disabled = !document;
@@ -1186,7 +1193,7 @@ async function openImportedMarkdownReader() {
       ? (engineSettings[LLM_PROVIDER_KEY] || 'openai')
       : 'browser-translator';
   const providerProfileKey = selectedEngine === TRANSLATION_ENGINE_LOCAL ? '' : getActiveProviderProfileStorageKey(providerId);
-  const pageTitle = document.name.replace(/\.(?:md|markdown)$/i, '') || uiMessage('markdownUntitled', '未命名 Markdown 文档');
+  const pageTitle = getImportedMarkdownReaderTitle(document);
   const now = Date.now();
   const record = {
     id: `markdown-import-${now}-${Math.random().toString(36).slice(2, 8)}`,

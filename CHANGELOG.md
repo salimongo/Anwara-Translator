@@ -12,6 +12,7 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 ### Changed
 
 - Chinese-target page, selection, and structured-reader translations now apply the same conservative punctuation normalization as manual translation before results enter the translation cache.
+- Imported Markdown readers now use their first level-one heading as the document title, falling back to the file name when no such heading exists.
 
 ### Fixed
 
