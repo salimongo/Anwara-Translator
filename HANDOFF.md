@@ -1,10 +1,29 @@
 # Handoff — Translator Reliability and Reader UX
 
-**Updated:** 2026-07-21
+**Updated:** 2026-07-22
 
 ## Frozen scope
 
 This pass improves recoverability, reading usability, and local provider-credential persistence. It now also supports multiple independent profiles per provider without changing provider request protocols.
+
+## Reliability checkpoint — 2026-07-22
+
+- **Implemented:** content-script translation results now use the same conservative Chinese punctuation normalization as manual translation before entering the page/selection/reader cache. The rule applies only to `zh-Hans` and `zh-Hant`; it converts punctuation directly after Han text while preserving URLs, decimal values, and citation-like text.
+- **Revision boundary:** `background.js`, `contentScript.js`, and `popup.js` declare `CONTENT_SCRIPT_VERSION = 1.6.21`. Existing pages must be refreshed after the unpacked extension is reloaded.
+- **Static evidence:** `node --check` passed for `contentScript.js`, `popup.js`, and `background.js`; `git diff --check` passed; file-extracted normalizer checks passed for simplified/traditional Chinese, English pass-through, URL/decimal/citation preservation, and normalize-before-cache order.
+- **Live acceptance passed by user on 2026-07-22:** after reloading the extension and refreshing the webpage, the Chinese-target translation path behaved correctly. Keep cache reuse as a normal regression check when changing cache keys or provider routing later.
+
+## Pause checkpoint — 2026-07-21
+
+- **Last pushed baseline:** `51edece` (`feat: refine full console and panel sizing`) is present on `origin/main`. The toolbar-popup size-tuner fallback was user-confirmed in Vivaldi before this pause.
+- **Current worktree caution:** this pause only writes this handoff. Before resuming, run a fresh `git status --short`; do not assume any old dirty-file list is current. Preserve every pre-existing change you find, and do not reset, reformat, stage, or fold it into an archive/UI commit without a separate review.
+- **Approved direction:** make **历史翻译** a short-term workbench and **阅读区** a long-term library. The first shelf-card separation is implemented below; larger library features remain out of scope.
+- **Data invariants to preserve:** deleting or clearing history must not remove reading-area items; removing a reading-area item must not delete history; adding an item to the reading area must be explicit, not an implicit side effect of structured reading; existing undo, reader-tab reuse, and saved reading position must survive.
+- **Next single move:** perform a read-only trace of archive/reader storage and handlers in `popup.js`, `reader.js`, `popup.html`, and `reader.html`. Map history items, reading items, delete/undo snapshots, and reader variants before changing CSS or adding controls. Record the map here, then implement the smallest two-subtab UI split.
+- **Non-goals for the first pass:** no data migration, automatic history-to-reading promotion, collection/tag system, or reader rewrite. First prove the separation and existing recovery behavior.
+- **2026-07-22 data audit:** history and reading use separate local-storage keys (`translatorHistory` and `translatorReadingArea`). Archive deletion, date deletion, and clear-all operate only on the active store; the eight-second undo snapshots both stores. Reader-page persistence updates duplicate copies by ID, while translation variants remain external. The remaining coupling is intentional duplicated record content plus the advisory `inReadingArea` flag, not a shared array.
+- **2026-07-22 smallest UI split:** the reading tab now renders a dedicated shelf card rather than the history preview card. It reads the existing `translatorReaderPositions` record only to show whether a saved reading position exists; it does not write positions, change the record schema, or alter history/reading mutations. Each shelf item exposes **继续阅读** and **移出阅读区**; bulk cleanup remains in the management area.
+- **Live acceptance still required:** reload the unpacked extension, visit **历史与阅读 → 阅读区**, confirm saved items use the shelf card while the history tab retains its old preview card. Click **继续阅读** once on an item with a saved position and once without; the reader should open/reuse normally. Click **移出阅读区**, confirm it disappears only from the reading tab and remains in history; then use the undoable reading-area cleanup path once.
 
 ## Multi-profile implementation — 2026-07-20
 

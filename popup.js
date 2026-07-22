@@ -74,6 +74,7 @@ const providerProfileStatus = document.getElementById('providerProfileStatus');
 const SELECTION_SHOW_BILINGUAL_KEY = 'translatorSelectionShowBilingual';
 const SELECTION_SHOW_SOURCE_KEY = 'translatorSelectionShowSource';
 const SAME_LANGUAGE_MODE_KEY = 'translatorSameLanguageMode';
+const MANUAL_SOURCE_LANGUAGE_KEY = 'translatorManualSourceLang';
 const SELECTION_PANEL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelDefaultSize';
 const SELECTION_PANEL_USE_GLOBAL_DEFAULT_SIZE_KEY = 'translatorSelectionPanelUseGlobalDefaultSize';
 const SELECTION_PANEL_REMEMBER_SITE_SIZE_KEY = 'translatorSelectionPanelRememberSiteSize';
@@ -83,7 +84,7 @@ const MAX_SELECTION_PANEL_WIDTH = 1600;
 const MAX_SELECTION_PANEL_HEIGHT = 1200;
 const DEFAULT_SELECTION_PANEL_WIDTH = 360;
 const DEFAULT_SELECTION_PANEL_HEIGHT = 220;
-const CONTENT_SCRIPT_VERSION = '1.6.18';
+const CONTENT_SCRIPT_VERSION = '1.6.21';
 const TRANSLATION_ENGINE_KEY = 'translatorDefaultEngine';
 const TRANSLATION_SITE_ENGINES_KEY = 'translatorSiteDefaultEngines';
 const TRANSLATION_ENGINE_LOCAL = 'local';
@@ -167,13 +168,30 @@ const historyEngineFilter = document.getElementById('historyEngineFilter');
 const historySiteFilter = document.getElementById('historySiteFilter');
 const historyDedupeToggle = document.getElementById('historyDedupeToggle');
 const historyUndoBtn = document.getElementById('historyUndoBtn');
+if (refreshHistoryBtn) {
+  refreshHistoryBtn.classList.add('archive-icon-btn');
+  refreshHistoryBtn.setAttribute('aria-label', '刷新历史记录');
+  refreshHistoryBtn.title = '刷新历史记录';
+  refreshHistoryBtn.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12a9 9 0 0 1-15.2 6.5L3 16"></path>
+      <path d="M3 21v-5h5"></path>
+      <path d="M3 12A9 9 0 0 1 18.2 5.5L21 8"></path>
+      <path d="M21 3v5h-5"></path>
+    </svg>`;
+}
+if (historyUndoBtn && refreshHistoryBtn?.parentElement) {
+  refreshHistoryBtn.parentElement.insertBefore(historyUndoBtn, refreshHistoryBtn);
+}
 const HISTORY_KEY = 'translatorHistory';
 const READING_KEY = 'translatorReadingArea';
 const VARIANTS_KEY = 'translatorTranslationVariants';
+const READER_POSITIONS_KEY = 'translatorReaderPositions';
 const HISTORY_ENABLED_KEY = 'translatorHistoryEnabled';
 const AUTO_READING_KEY = 'translatorAutoAddToReading';
 let historyItems = [];
 let readingItems = [];
+let readerPositions = {};
 let historyLoaded = false;
 let historyLoadPromise = null;
 let historyRenderLimit = 40;
@@ -182,8 +200,10 @@ let clearConfirmView = null;
 let clearConfirmTimer = null;
 let dateDeleteSignature = null;
 let dateDeleteConfirmTimer = null;
-let archiveUndo = null;
+let archiveUndoStack = [];
+let archiveUndoExpiresAt = 0;
 let archiveUndoTimer = null;
+let archiveUndoCountdownTimer = null;
 
 function normalizeStoredItems(value) {
   if (!Array.isArray(value)) return [];
@@ -250,9 +270,21 @@ function syncArchiveTabs(view) {
 
 function setHistoryToolsOpen(open) {
   const isOpen = Boolean(open);
+  const isFullConsoleArchive = document.body.classList.contains('full-console');
   historyTools?.classList.toggle('hidden', !isOpen);
   historyManageBtn?.setAttribute('aria-expanded', String(isOpen));
-  if (historyManageBtn) historyManageBtn.textContent = isOpen ? '收起' : '管理';
+  if (!historyManageBtn) return;
+
+  if (isFullConsoleArchive) {
+    historyManageBtn.textContent = '';
+    historyManageBtn.setAttribute('aria-label', isOpen ? '收起归档工具' : '展开归档工具');
+    historyManageBtn.title = isOpen ? '收起归档工具' : '展开归档工具';
+    return;
+  }
+
+  historyManageBtn.textContent = isOpen ? '收起' : '管理';
+  historyManageBtn.setAttribute('aria-label', isOpen ? '收起历史管理工具' : '打开历史管理工具');
+  historyManageBtn.title = isOpen ? '收起历史管理工具' : '打开历史管理工具';
 }
 
 function splitReaderUnits(text) {
@@ -375,6 +407,7 @@ function adjustReaderFont(delta) {
 function setHistoryStatus(message, kind = '') {
   if (!historyStatus) return;
   historyStatus.textContent = uiText(message);
+  historyStatus.dataset.kind = kind;
   historyStatus.style.color = kind === 'err' ? '#b91c1c' : kind === 'ok' ? '#047857' : 'var(--muted)';
 }
 
@@ -430,26 +463,40 @@ function resetDateDeleteConfirmation() {
 
 function updateArchiveUndoButton() {
   if (!historyUndoBtn) return;
-  historyUndoBtn.classList.toggle('hidden', !archiveUndo);
-  historyUndoBtn.textContent = archiveUndo ? '撤销（8秒）' : '撤销';
+  const remainingSeconds = archiveUndoStack.length
+    ? Math.max(0, Math.ceil((archiveUndoExpiresAt - Date.now()) / 1000))
+    : 0;
+  const isVisible = Boolean(archiveUndoStack.length && remainingSeconds > 0);
+  historyUndoBtn.classList.toggle('hidden', !isVisible);
+  historyUndoBtn.textContent = isVisible ? String(remainingSeconds) : '';
+  historyUndoBtn.style.setProperty('--undo-progress', `${Math.max(0, Math.min(1, remainingSeconds / 8)) * 360}deg`);
+  const stackedLabel = archiveUndoStack.length > 1 ? `，可连续撤回 ${archiveUndoStack.length} 次` : '';
+  historyUndoBtn.setAttribute('aria-label', isVisible ? `撤销最近一次归档删除，剩余 ${remainingSeconds} 秒${stackedLabel}` : '撤销最近一次归档删除');
+  historyUndoBtn.title = isVisible ? `撤销删除（剩余 ${remainingSeconds} 秒${stackedLabel}）` : '撤销最近一次归档删除';
 }
 
 function clearArchiveUndo({ prune = true } = {}) {
   if (archiveUndoTimer) clearTimeout(archiveUndoTimer);
+  if (archiveUndoCountdownTimer) clearInterval(archiveUndoCountdownTimer);
   archiveUndoTimer = null;
-  archiveUndo = null;
+  archiveUndoCountdownTimer = null;
+  archiveUndoExpiresAt = 0;
+  archiveUndoStack = [];
   updateArchiveUndoButton();
   if (prune) pruneTranslationVariants().catch(() => {});
 }
 
 function armArchiveUndo(description) {
   if (archiveUndoTimer) clearTimeout(archiveUndoTimer);
-  archiveUndo = {
+  archiveUndoStack.push({
     historyItems: historyItems.map((item) => ({ ...item })),
     readingItems: readingItems.map((item) => ({ ...item })),
     description
-  };
+  });
+  archiveUndoStack = archiveUndoStack.slice(-12);
+  archiveUndoExpiresAt = Date.now() + 8000;
   updateArchiveUndoButton();
+  if (!archiveUndoCountdownTimer) archiveUndoCountdownTimer = setInterval(updateArchiveUndoButton, 250);
   archiveUndoTimer = setTimeout(() => clearArchiveUndo({ prune: true }), 8000);
 }
 
@@ -461,14 +508,21 @@ async function persistArchiveState(options = {}) {
 }
 
 async function restoreArchiveUndo() {
-  if (!archiveUndo) return;
-  const snapshot = archiveUndo;
-  clearArchiveUndo({ prune: false });
+  const snapshot = archiveUndoStack.pop();
+  if (!snapshot) return;
+  if (!archiveUndoStack.length) {
+    if (archiveUndoTimer) clearTimeout(archiveUndoTimer);
+    if (archiveUndoCountdownTimer) clearInterval(archiveUndoCountdownTimer);
+    archiveUndoTimer = null;
+    archiveUndoCountdownTimer = null;
+    archiveUndoExpiresAt = 0;
+  }
+  updateArchiveUndoButton();
   historyItems = snapshot.historyItems.map((item) => ({ ...item }));
   readingItems = snapshot.readingItems.map((item) => ({ ...item }));
   try {
     await persistArchiveState();
-    setHistoryStatus('已撤销：' + snapshot.description, 'ok');
+    setHistoryStatus('', '');
   } catch (error) {
     setHistoryStatus('撤销失败：' + String(error?.message || error || ''), 'err');
   }
@@ -497,6 +551,69 @@ function createHistoryButton(label, action, id) {
   return button;
 }
 
+function getReadingShelfTitle(item) {
+  const pageTitle = String(item?.pageTitle || '').trim();
+  if (pageTitle && pageTitle !== '主功能区翻译') return pageTitle;
+  try {
+    return new URL(String(item?.pageUrl || '')).hostname || pageTitle || '未命名阅读';
+  } catch {
+    return pageTitle || '未命名阅读';
+  }
+}
+
+function getReadingShelfEngineLabel(item) {
+  if (item?.engineStage === 'llm') return '大模型翻译';
+  if (item?.engineStage === 'online') return '在线翻译';
+  return '本地翻译';
+}
+
+function createReadingShelfCard(item) {
+  const card = document.createElement('article');
+  card.className = 'history-card reading-shelf-card';
+  const header = document.createElement('div');
+  header.className = 'reading-shelf-header';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'history-select';
+  checkbox.dataset.id = item.id;
+  checkbox.title = '选择此阅读项';
+  header.appendChild(checkbox);
+
+  const body = document.createElement('div');
+  body.className = 'reading-shelf-body';
+  const title = document.createElement('h3');
+  title.className = 'reading-shelf-title';
+  title.textContent = getReadingShelfTitle(item);
+  title.title = title.textContent;
+
+  const preview = document.createElement('p');
+  preview.className = 'reading-shelf-preview';
+  preview.textContent = truncateHistoryPreview(item.translatedText);
+
+  const details = document.createElement('div');
+  details.className = 'reading-shelf-details';
+  const language = `${item.sourceLang || 'auto'} → ${item.targetLang || 'zh-Hans'}`;
+  const position = readerPositions[item.id];
+  const resume = Number(position?.updatedAt) > 0
+    ? `上次阅读 ${formatHistoryTime(position.updatedAt)}`
+    : '尚未开始阅读';
+  details.textContent = `${language} · ${getReadingShelfEngineLabel(item)} · ${resume}`;
+
+  body.append(title, preview, details);
+  header.appendChild(body);
+  card.appendChild(header);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-card-actions reading-shelf-actions';
+  const continueButton = createHistoryButton('继续阅读', 'reader', item.id);
+  continueButton.classList.add('reading-shelf-primary');
+  actions.appendChild(continueButton);
+  actions.appendChild(createHistoryButton('移出阅读区', 'reading', item.id));
+  card.appendChild(actions);
+  return card;
+}
+
 function syncHistorySelectionControls() {
   if (!historySelectAllBtn) return;
   const selections = Array.from(historyList?.querySelectorAll('.history-select') || []);
@@ -522,8 +639,13 @@ function renderHistoryList(options = {}) {
   }
 
   const itemsToRender = visibleItems.slice(0, historyRenderLimit);
+  const activeView = getActiveArchiveView();
   const fragment = document.createDocumentFragment();
   for (const item of itemsToRender) {
+    if (activeView === 'reading') {
+      fragment.appendChild(createReadingShelfCard(item));
+      continue;
+    }
     const card = document.createElement('div');
     card.className = 'history-card';
     card.style.cssText = 'padding:8px;margin-bottom:6px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;';
@@ -594,12 +716,21 @@ async function loadHistoryState(options = {}) {
   if (historyLoadPromise && !options.force) return historyLoadPromise;
   historyLoadPromise = (async () => {
     try {
-      const result = await chrome.storage.local.get([HISTORY_KEY, READING_KEY, HISTORY_ENABLED_KEY, AUTO_READING_KEY]);
+      const result = await chrome.storage.local.get([
+        HISTORY_KEY,
+        READING_KEY,
+        READER_POSITIONS_KEY,
+        HISTORY_ENABLED_KEY,
+        AUTO_READING_KEY
+      ]);
       historyItems = normalizeStoredItems(result[HISTORY_KEY]);
       const hasReadingStore = Array.isArray(result[READING_KEY]);
       readingItems = hasReadingStore
         ? normalizeStoredItems(result[READING_KEY])
         : historyItems.filter((item) => item?.inReadingArea === true).map((item) => ({ ...item, inReadingArea: true }));
+      readerPositions = result[READER_POSITIONS_KEY] && typeof result[READER_POSITIONS_KEY] === 'object'
+        ? result[READER_POSITIONS_KEY]
+        : {};
       if (!hasReadingStore) {
         await chrome.storage.local.set({ [READING_KEY]: readingItems });
       }
@@ -872,14 +1003,7 @@ function updateCharCount() {
   if (!charCountEl) return;
   const len = inputEl.value.length;
   charCountEl.textContent = `字数：${len}`;
-
-  // Update character count styling based on length
   charCountEl.className = 'char-count';
-  if (len > 1000) {
-    charCountEl.classList.add('danger');
-  } else if (len > 500) {
-    charCountEl.classList.add('warning');
-  }
   if (clearInputBtn) clearInputBtn.disabled = len === 0;
 }
 
@@ -1987,7 +2111,17 @@ function normalizeLang(code) {
   return code;
 }
 
-
+function normalizeChineseTranslatedPunctuation(text, targetLanguage) {
+  if (!['zh-Hans', 'zh-Hant'].includes(normalizeLang(targetLanguage))) return String(text || '');
+  const han = '\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff';
+  return String(text || '')
+    .replace(new RegExp(`([${han}])\\s*,\\s*`, 'g'), '$1，')
+    .replace(new RegExp(`([${han}])\\s*;\\s*`, 'g'), '$1；')
+    .replace(new RegExp(`([${han}])\\s*:\\s*`, 'g'), '$1：')
+    .replace(new RegExp(`([${han}])\\s*!\\s*(?=\\s|$|[”）】])`, 'g'), '$1！')
+    .replace(new RegExp(`([${han}])\\s*\\?\\s*(?=\\s|$|[”）】])`, 'g'), '$1？')
+    .replace(new RegExp(`([${han}])\\s*\\.\\s*(?=\\s|$|[”）】])`, 'g'), '$1。');
+}
 
 function featureDetect() {
   const hasTranslator = typeof window.Translator !== "undefined";
@@ -2007,20 +2141,81 @@ async function checkAvailability(sourceLanguage, targetLanguage) {
   }
 }
 
-async function detectLanguageIfNeeded(text, hasDetector) {
-  if (!text || !hasDetector) return null;
-  try {
-    const detector = await LanguageDetector.create({ expectedInputLanguages: LANGS.filter(l => l[0] !== "auto").map(l => l[0]) });
-    const results = await detector.detect(text);
-    detector.destroy?.();
-    if (Array.isArray(results) && results.length > 0) {
-      // results are likely sorted by confidence
-      return results[0].detectedLanguage || null;
-    }
-  } catch (e) {
-    console.warn("Language detection failed", e);
-  }
+function getManualScriptLanguageHint(text) {
+  const value = String(text || '');
+  if (/[\u3040-\u30ff\u31f0-\u31ff]/.test(value)) return 'ja';
+  if (/[\uac00-\ud7af\u1100-\u11ff]/.test(value)) return 'ko';
+  if (/[\u0400-\u052f]/.test(value)) return 'ru';
+  if (/[\u0600-\u06ff]/.test(value)) return 'ar';
+  if (/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(value)) return 'zh-Hans';
+  if (/[A-Za-z\u00c0-\u024f]{2}/.test(value)) return 'en';
   return null;
+}
+
+function normalizeManualDetectedLanguage(code) {
+  const value = String(code || '').trim();
+  if (!value) return null;
+  const lower = value.toLowerCase();
+  if (lower === 'zh' || lower === 'zh-hans' || lower.startsWith('zh-cn') || lower.startsWith('zh-sg')) return 'zh-Hans';
+  if (lower === 'zh-hant' || lower.startsWith('zh-tw') || lower.startsWith('zh-hk')) return 'zh-Hant';
+  const base = lower.split('-')[0];
+  return LANGS.some(([language]) => language === base) ? base : null;
+}
+
+const MANUAL_DETECTION_MIN_CONFIDENCE = 0.65;
+const MANUAL_DETECTION_MIN_MARGIN = 0.14;
+
+function getManualDetectionSamples(text, maxLength = 900) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return [];
+  if (value.length <= maxLength) return [value];
+
+  const offsets = [0, Math.floor((value.length - maxLength) / 2), value.length - maxLength];
+  return [...new Set(offsets.map((offset) => value.slice(offset, offset + maxLength).trim()).filter(Boolean))];
+}
+
+function chooseManualDetectedLanguage(resultGroups) {
+  const scores = new Map();
+  for (const results of resultGroups) {
+    for (const [rank, result] of (Array.isArray(results) ? results.slice(0, 3) : []).entries()) {
+      const language = normalizeManualDetectedLanguage(result?.detectedLanguage);
+      const confidence = Number(result?.confidence);
+      if (!language || !Number.isFinite(confidence) || confidence <= 0) continue;
+      const rankWeight = rank === 0 ? 1 : rank === 1 ? 0.35 : 0.15;
+      scores.set(language, (scores.get(language) || 0) + confidence * rankWeight);
+    }
+  }
+
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+  const [winner, winnerScore] = ranked[0] || [];
+  const runnerUpScore = ranked[1]?.[1] || 0;
+  const sampleCount = Math.max(1, resultGroups.length);
+  if (!winner) return null;
+  if (winnerScore / sampleCount < MANUAL_DETECTION_MIN_CONFIDENCE) return null;
+  if ((winnerScore - runnerUpScore) / sampleCount < MANUAL_DETECTION_MIN_MARGIN) return null;
+  return winner;
+}
+
+async function detectLanguageIfNeeded(text, hasDetector) {
+  const scriptHint = getManualScriptLanguageHint(text);
+  if (['ja', 'ko', 'ru', 'ar'].includes(scriptHint)) return scriptHint;
+  if (!text || !hasDetector) return scriptHint;
+
+  let detector = null;
+  try {
+    detector = await LanguageDetector.create({ expectedInputLanguages: LANGS.filter(l => l[0] !== "auto").map(l => l[0]) });
+    const resultGroups = [];
+    for (const sample of getManualDetectionSamples(text)) {
+      resultGroups.push(await detector.detect(sample));
+    }
+    const detected = chooseManualDetectedLanguage(resultGroups);
+    return detected || scriptHint;
+  } catch (e) {
+    console.warn("Language detection failed; manual source selection is required", e);
+    return scriptHint;
+  } finally {
+    detector?.destroy?.();
+  }
 }
 function getNextTargetLang(current) {
 async function translateWithAutoFallback(sourceLanguage, initialTarget, text) {
@@ -2108,10 +2303,132 @@ async function translateWithAutoFallback(sourceLanguage, initialTarget, text) {
 }
 
 
+const MANUAL_TRANSLATION_CHUNK_LENGTH = 3000;
+const MANUAL_TRANSLATION_CACHE_LIMIT = 160;
+const manualTranslationSessionCache = new Map();
+
+function splitManualTranslationText(text, maxLength = MANUAL_TRANSLATION_CHUNK_LENGTH) {
+  const normalized = String(text || '').replace(/\r\n?/g, '\n');
+  if (normalized.length <= maxLength) return [normalized];
+
+  const chunks = [];
+  const minimumPreferredLength = Math.max(1, Math.floor(maxLength * 0.45));
+  const breakMarkers = ['\n\n', '\n', '。', '！', '？', '；', '.', '!', '?', ' '];
+  let offset = 0;
+
+  while (offset < normalized.length) {
+    const remaining = normalized.length - offset;
+    if (remaining <= maxLength) {
+      chunks.push(normalized.slice(offset));
+      break;
+    }
+
+    const windowText = normalized.slice(offset, offset + maxLength);
+    let chunkLength = 0;
+    for (const marker of breakMarkers) {
+      const markerIndex = windowText.lastIndexOf(marker);
+      const candidateLength = markerIndex + marker.length;
+      if (markerIndex >= 0 && candidateLength >= minimumPreferredLength) {
+        chunkLength = candidateLength;
+        break;
+      }
+    }
+
+    if (!chunkLength) chunkLength = maxLength;
+    chunks.push(normalized.slice(offset, offset + chunkLength));
+    offset += chunkLength;
+  }
+
+  return chunks;
+}
+
+function getManualTranslationCacheKey({ chunk, sourceLanguage, targetLanguage, engineId, providerId, profileKey }) {
+  return JSON.stringify([
+    String(chunk || ''),
+    normalizeLang(sourceLanguage || ''),
+    normalizeLang(targetLanguage || ''),
+    String(engineId || ''),
+    String(providerId || ''),
+    String(profileKey || '')
+  ]);
+}
+
+function rememberManualTranslationChunk(cacheKey, translation) {
+  manualTranslationSessionCache.delete(cacheKey);
+  manualTranslationSessionCache.set(cacheKey, translation);
+  while (manualTranslationSessionCache.size > MANUAL_TRANSLATION_CACHE_LIMIT) {
+    manualTranslationSessionCache.delete(manualTranslationSessionCache.keys().next().value);
+  }
+}
+
+async function translateManualTextInChunks({
+  text,
+  sourceLanguage,
+  engineId,
+  providerId,
+  profileKey,
+  getTargetLanguage,
+  translateChunk,
+  onProgress
+}) {
+  const chunks = splitManualTranslationText(text);
+  const translations = [];
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    onProgress?.({ index, completed: index, total: chunks.length, translation: translations.join(''), phase: 'start' });
+    const chunk = chunks[index];
+    const requestedTargetLanguage = getTargetLanguage?.() || '';
+    const requestedCacheKey = getManualTranslationCacheKey({
+      chunk,
+      sourceLanguage,
+      targetLanguage: requestedTargetLanguage,
+      engineId,
+      providerId,
+      profileKey
+    });
+    let translation = manualTranslationSessionCache.get(requestedCacheKey);
+
+    if (typeof translation === 'string') {
+      manualTranslationSessionCache.delete(requestedCacheKey);
+      manualTranslationSessionCache.set(requestedCacheKey, translation);
+    } else {
+      try {
+        const result = await translateChunk(chunk, index, chunks.length);
+        const resultText = typeof result === 'string' ? result : result?.translation;
+        translation = String(resultText || '');
+        if (!translation.trim()) throw new Error('TRANSLATION_CHUNK_EMPTY_RESPONSE');
+
+        const effectiveTargetLanguage = typeof result === 'string'
+          ? requestedTargetLanguage
+          : (result?.targetLanguage || requestedTargetLanguage);
+        rememberManualTranslationChunk(getManualTranslationCacheKey({
+          chunk,
+          sourceLanguage,
+          targetLanguage: effectiveTargetLanguage,
+          engineId,
+          providerId,
+          profileKey
+        }), translation);
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error || 'TRANSLATION_CHUNK_FAILED'));
+        failure.manualTranslationPartial = translations.join('');
+        failure.manualTranslationChunkIndex = index + 1;
+        failure.manualTranslationChunkCount = chunks.length;
+        throw failure;
+      }
+    }
+
+    translations.push(translation);
+    onProgress?.({ index, completed: index + 1, total: chunks.length, translation: translations.join(''), phase: 'complete' });
+  }
+
+  return translations.join('');
+}
+
 async function doTranslate() {
   outputEl.textContent = "";
-  const text = inputEl.value.trim();
-  if (!text) {
+  const text = inputEl.value.replace(/\r\n?/g, '\n');
+  if (!text.trim()) {
     setStatus("请输入要翻译的文本。", "warn");
     return;
   }
@@ -2135,10 +2452,16 @@ async function doTranslate() {
   translateBtn.disabled = true;
   translateBtn.classList.add('loading');
   setCopyEnabled(false);
+  speakBtn?.removeEventListener("click", speakOutput);
+  speakBtn?.addEventListener("click", speakOutput);
+  copyBtn?.removeEventListener("click", copyOutput);
+  copyBtn?.addEventListener("click", copyOutput);
   setStatus("正在准备翻译...", "");
 
   let sourceLanguage = sourceSelect.value;
   let targetLanguage = targetSelect.value;
+  let translator = null;
+  let showTimer = null;
 
   try {
     if (sourceLanguage === "auto") {
@@ -2147,8 +2470,8 @@ async function doTranslate() {
         sourceLanguage = detected;
         setStatus(`检测到来源语言：${detected}`, "ok");
       } else {
-        setStatus("自动检测不可用；将回退为英文作为来源。", "warn");
-        sourceLanguage = "en";
+        setStatus("无法可靠识别来源语言，请在顶部手动选择后重试。", "err");
+        return;
       }
     }
 
@@ -2167,12 +2490,35 @@ async function doTranslate() {
     }
 
     if (selectedEngine !== TRANSLATION_ENGINE_LOCAL) {
-      setStatus(`正在使用${translationEngineLabel(selectedEngine)}...`, '');
       const providerProfileKey = getActiveProviderProfileStorageKey(providerId);
-      const response = await chrome.runtime.sendMessage({ type: 'TRANSLATE_WITH_PROVIDER', text, sourceLang: sourceLanguage, targetLang: targetLanguage, providerId, profileKey: providerProfileKey });
-      if (!response?.ok) throw new Error(response?.error || 'PROVIDER_TRANSLATION_FAILED');
-      const translation = String(response.translation || '');
-      if (!translation.trim()) throw new Error('PROVIDER_EMPTY_RESPONSE');
+      const translation = await translateManualTextInChunks({
+        text,
+        sourceLanguage,
+        engineId: selectedEngine,
+        providerId,
+        profileKey: providerProfileKey,
+        getTargetLanguage: () => targetLanguage,
+        translateChunk: async (chunk) => {
+          const response = await chrome.runtime.sendMessage({
+            type: 'TRANSLATE_WITH_PROVIDER',
+            text: chunk,
+            sourceLang: sourceLanguage,
+            targetLang: targetLanguage,
+            providerId,
+            profileKey: providerProfileKey
+          });
+          if (!response?.ok) throw new Error(response?.error || 'PROVIDER_TRANSLATION_FAILED');
+          return { translation: normalizeChineseTranslatedPunctuation(response.translation, targetLanguage), targetLanguage };
+        },
+        onProgress: ({ completed, total, translation: partialTranslation, phase }) => {
+          if (partialTranslation) {
+            outputEl.textContent = partialTranslation;
+            setCopyEnabled(true);
+            setSpeakEnabled(true);
+          }
+          if (phase === 'start') setStatus(`正在翻译第 ${completed + 1}/${total} 段...`, '');
+        }
+      });
       outputEl.textContent = translation;
       setCopyEnabled(true);
       setSpeakEnabled(true);
@@ -2187,11 +2533,8 @@ async function doTranslate() {
     }
 
     // 如需下载模型时才显示进度条（避免已缓存时闪现100%）
-    let translator;
     const needMonitor = availability === "downloadable" || availability === "downloading";
     let progressShown = false;
-
-    let showTimer = null;
     let usedTarget = targetLanguage;
 
 	    // 避免来源语言与目标语言相同导致不支持的语言对
@@ -2254,43 +2597,44 @@ async function doTranslate() {
       }
     }
 
-    // 简单模式：翻译完成后隐藏进度
+    const translation = await translateManualTextInChunks({
+      text,
+      sourceLanguage,
+      engineId: selectedEngine,
+      providerId,
+      getTargetLanguage: () => usedTarget,
+      translateChunk: async (chunk) => {
+        try {
+          return { translation: normalizeChineseTranslatedPunctuation(await translator.translate(chunk), usedTarget), targetLanguage: usedTarget };
+        } catch (error) {
+          const message = String(error?.message || error || '');
+          if (!isPairUnsupported(message)) throw error;
 
-    let translation;
-    try {
-      translation = await translator.translate(text);
-    } catch (e) {
-      const msg = String(e?.message || e || "");
-      if (isPairUnsupported(msg)) {
-        // 顺延目标语言并重试一次
-        const next = getNextTargetLang(targetLanguage);
-        if (next && next !== targetLanguage) {
+          const next = getNextTargetLang(usedTarget);
+          if (!next || next === usedTarget) throw error;
+          translator?.destroy?.();
+          usedTarget = next;
           targetSelect.value = next;
           setStatus("目标语言与来源语言冲突，已自动顺延为：" + next + "，正在重试...", "warn");
-          // 重建 translator 并重试
-          const avail2 = await checkAvailability(sourceLanguage, next);
-          if (avail2 === "downloadable" || avail2 === "downloading") {
-            translator = await Translator.create({ sourceLanguage: normalizeLang(sourceLanguage), targetLanguage: normalizeLang(next) });
-          } else {
-            translator = await Translator.create({ sourceLanguage: normalizeLang(sourceLanguage), targetLanguage: normalizeLang(next) });
-          }
-          translation = await translator.translate(text);
-        } else {
-          throw e;
+          translator = await Translator.create({
+            sourceLanguage: normalizeLang(sourceLanguage),
+            targetLanguage: normalizeLang(usedTarget)
+          });
+          return { translation: normalizeChineseTranslatedPunctuation(await translator.translate(chunk), usedTarget), targetLanguage: usedTarget };
         }
-
-      // 绑定复制按钮（若存在）
-      // avoid duplicate listener on retry
-      copyBtn?.removeEventListener("click", copyOutput);
-      copyBtn?.addEventListener("click", copyOutput);
-
-      } else {
-        throw e;
+      },
+      onProgress: ({ completed, total, translation: partialTranslation, phase }) => {
+        if (partialTranslation) {
+          outputEl.textContent = partialTranslation;
+          setCopyEnabled(true);
+          setSpeakEnabled(true);
+        }
+        if (phase === 'start') setStatus(`正在翻译第 ${completed + 1}/${total} 段...`, '');
       }
-    }
+    });
 
     outputEl.textContent = translation;
-    const hasText = !!(translation && translation.trim());
+    const hasText = !!translation.trim();
     setCopyEnabled(hasText);
     if (hasText) {
       await recordManualTranslationHistory(text, translation, sourceLanguage, usedTarget, {
@@ -2300,34 +2644,39 @@ async function doTranslate() {
       });
     }
 
-    // 绑定朗读与复制按钮（若存在）
-    // avoid duplicate listeners
     speakBtn?.removeEventListener("click", speakOutput);
     speakBtn?.addEventListener("click", speakOutput);
     copyBtn?.removeEventListener("click", copyOutput);
     copyBtn?.addEventListener("click", copyOutput);
-
     setSpeakEnabled(hasText);
-
-    const quota = translator.inputQuota;
-    if (quota) {
-      setStatus(`完成。剩余输入配额：${quota.remaining ?? "?"}/${quota.limit ?? "?"}`, "ok");
-    } else {
-      setStatus("完成。", "ok");
-    }
-
-    translator.destroy?.();
+    setStatus("完成。", "ok");
 
   } catch (err) {
-    const msg = String(err?.message || err || "");
-    if (isPairUnsupported(msg)) {
-      setStatus("语言冲突，请更改为其他目标语言", "err");
+    const partialTranslation = String(err?.manualTranslationPartial || '');
+    if (partialTranslation) {
+      outputEl.textContent = partialTranslation;
+      setCopyEnabled(true);
+      setSpeakEnabled(true);
+      speakBtn?.removeEventListener("click", speakOutput);
+      speakBtn?.addEventListener("click", speakOutput);
+      copyBtn?.removeEventListener("click", copyOutput);
+      copyBtn?.addEventListener("click", copyOutput);
+    }
+
+    if (err?.manualTranslationChunkIndex && err?.manualTranslationChunkCount) {
+      setStatus(`第 ${err.manualTranslationChunkIndex}/${err.manualTranslationChunkCount} 段翻译失败；已保留完成部分，重试会复用本次已成功的段。`, "err");
     } else {
-      setStatus(`错误：${msg}`, "err");
+      const msg = String(err?.message || err || "");
+      if (isPairUnsupported(msg)) {
+        setStatus("语言冲突，请更改为其他目标语言", "err");
+      } else {
+        setStatus(`错误：${msg}`, "err");
+      }
     }
   } finally {
     // 清理延迟显示定时器，隐藏/复位进度条
-    if (typeof showTimer !== "undefined" && showTimer) clearTimeout(showTimer);
+    if (showTimer) clearTimeout(showTimer);
+    translator?.destroy?.();
     downloadSection.classList.add("hidden");
     downloadProgress.value = 0;
     downloadPct.textContent = "0%";
@@ -2350,6 +2699,10 @@ swapBtn?.addEventListener("click", () => {
     targetSelect.value = prevSource;
   }
   updateHints();
+  chrome.storage.sync.set({
+    [MANUAL_SOURCE_LANGUAGE_KEY]: sourceSelect.value,
+    autoTranslateTargetLang: targetSelect.value
+  }).catch((error) => console.warn('保存手动语言选择失败:', error));
 });
 
 // 初始化：加载设置并同步 UI
@@ -2360,6 +2713,7 @@ swapBtn?.addEventListener("click", () => {
       'selectionTranslateEnabled',
       'floatingButtonEnabled',
       'autoTranslateTargetLang',
+      MANUAL_SOURCE_LANGUAGE_KEY,
       SELECTION_SHOW_BILINGUAL_KEY,
       SELECTION_SHOW_SOURCE_KEY,
       SAME_LANGUAGE_MODE_KEY
@@ -2396,6 +2750,9 @@ swapBtn?.addEventListener("click", () => {
       ? uiMessage('sameLanguageContinue', '同语言时继续翻译')
       : uiMessage('sameLanguageKeepOriginal', '同语言时保留原文');
     if (s.autoTranslateTargetLang) targetSelect.value = s.autoTranslateTargetLang;
+    if (LANGS.some(([language]) => language === s[MANUAL_SOURCE_LANGUAGE_KEY])) {
+      sourceSelect.value = s[MANUAL_SOURCE_LANGUAGE_KEY];
+    }
     await loadSelectionPanelDefaultSize();
     
     // 加载白名单和默认引擎；历史记录切到历史页时再按需加载
@@ -2926,7 +3283,11 @@ async function updateHints() {
   const avail = await checkAvailability(src, tgt);
   if (avail) setStatus(`模型可用性：${avail}`, "");
 }
-sourceSelect.addEventListener("change", updateHints);
+sourceSelect.addEventListener("change", () => {
+  updateHints();
+  chrome.storage.sync.set({ [MANUAL_SOURCE_LANGUAGE_KEY]: sourceSelect.value })
+    .catch((error) => console.warn('保存手动来源语言失败:', error));
+});
 targetSelect.addEventListener("change", updateHints);
 
 function prepareSensitiveInputPrivacy() {
@@ -3120,6 +3481,72 @@ function prepareFullConsoleProviderProfileLayout(workspace) {
   grid.dataset.fullConsoleSplit = 'true';
 }
 
+function prepareFullConsoleArchiveLayout(workspace) {
+  const historySection = workspace.querySelector('#historySection');
+  const heading = historySection?.querySelector('.archive-heading');
+  const actions = heading?.querySelector('.archive-header-actions');
+  const viewbar = historySection?.querySelector('.archive-viewbar');
+  if (!historySection || !viewbar) return;
+
+  if (heading && actions) {
+    viewbar.appendChild(actions);
+    heading.remove();
+  }
+  if (historySection.dataset.fullConsoleArchivePrepared === 'true') return;
+
+  const tools = historySection.querySelector('#historyTools');
+  const query = tools?.querySelector('.history-query-row');
+  const filterRow = tools?.querySelector('.history-filter-row');
+  const preferences = tools?.querySelector('.history-tool-options');
+  const searchInput = query?.querySelector('#historySearchInput');
+  const engineFilter = query?.querySelector('#historyEngineFilter');
+  const siteFilter = filterRow?.querySelector('#historySiteFilter');
+  const dedupeOption = filterRow?.querySelector('.history-dedupe-option');
+  const manageButton = actions?.querySelector('#historyManageBtn');
+  const refreshButton = actions?.querySelector('#refreshHistoryBtn');
+  if (!tools || !searchInput || !manageButton) return;
+
+  const searchMenu = document.createElement('div');
+  searchMenu.className = 'history-search-menu';
+  const capsule = document.createElement('div');
+  capsule.className = 'history-search-capsule';
+  capsule.setAttribute('role', 'search');
+  capsule.setAttribute('aria-label', '搜索历史与阅读区');
+
+  capsule.appendChild(searchInput);
+  manageButton.classList.add('archive-capsule-toggle');
+  manageButton.setAttribute('aria-controls', 'historyTools');
+  capsule.appendChild(manageButton);
+  searchMenu.append(capsule, tools);
+  viewbar.insertBefore(searchMenu, actions || null);
+
+  if (engineFilter) {
+    const engineRow = document.createElement('label');
+    engineRow.className = 'history-engine-row';
+    const engineLabel = document.createElement('span');
+    engineLabel.textContent = '翻译方式';
+    engineRow.append(engineLabel, engineFilter);
+    tools.prepend(engineRow);
+  }
+  if (dedupeOption && preferences) preferences.appendChild(dedupeOption);
+  if (siteFilter) siteFilter.value = '';
+  query?.remove();
+  filterRow?.remove();
+
+  setHistoryToolsOpen(false);
+  document.addEventListener('pointerdown', (event) => {
+    if (historyTools?.classList.contains('hidden')) return;
+    if (!searchMenu.contains(event.target)) setHistoryToolsOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || historyTools?.classList.contains('hidden')) return;
+    setHistoryToolsOpen(false);
+    manageButton.focus();
+  });
+
+  historySection.dataset.fullConsoleArchivePrepared = 'true';
+}
+
 function prepareFullConsoleProjectLink(tabs, workspace) {
   if (!tabs || tabs.querySelector('.console-sidebar-footer')) return;
 
@@ -3147,6 +3574,21 @@ function prepareFullConsoleProjectLink(tabs, workspace) {
   sourceSection.dataset.fullConsoleProjectLink = 'true';
 }
 
+function prepareFullConsoleTranslationActions(workspace) {
+  const translateButton = workspace.querySelector('#translateBtn');
+  const status = workspace.querySelector('#status');
+  const download = workspace.querySelector('#downloadSection');
+  const outputSection = workspace.querySelector('.translation-output-section');
+  if (!translateButton || !status || !download || translateButton.parentElement?.classList.contains('translation-action-stack')) return;
+
+  const actionStack = document.createElement('section');
+  actionStack.className = 'translation-action-stack';
+  actionStack.setAttribute('aria-label', '翻译操作与进度');
+  if (outputSection) workspace.insertBefore(actionStack, outputSection);
+  else workspace.appendChild(actionStack);
+  actionStack.append(translateButton, status, download);
+}
+
 function prepareFullConsoleLayout() {
   const card = document.querySelector('.card');
   const header = card?.querySelector('.console-header');
@@ -3165,8 +3607,10 @@ function prepareFullConsoleLayout() {
   for (const child of Array.from(card.children)) {
     if (child !== header && child !== tabs) workspace.appendChild(child);
   }
+  prepareFullConsoleTranslationActions(workspace);
   prepareFullConsoleSettingsGroups(workspace);
   prepareFullConsoleProviderProfileLayout(workspace);
+  prepareFullConsoleArchiveLayout(workspace);
   prepareFullConsoleProjectLink(tabs, workspace);
   card.appendChild(workspace);
 }

@@ -1,7 +1,7 @@
 // contentScript.js - Translate page text in-place using Chrome Translator API, preserving layout
 
 (() => {
-  const CONTENT_SCRIPT_VERSION = '1.6.18';
+  const CONTENT_SCRIPT_VERSION = '1.6.21';
   // Existing pages keep their old listeners. Tell the user the safe refresh boundary.
   if (window.translatorContentScriptLoaded) {
     if (window.translatorContentScriptVersion !== CONTENT_SCRIPT_VERSION && !document.getElementById('anwara-translator-refresh-notice')) {
@@ -85,6 +85,9 @@
   const TRANSLATION_PROVIDER_ACTIVE_PROFILE_KEY = 'translatorProviderActiveProfileIds';
   const TRANSLATION_PROVIDER_PROFILES_KEY = 'translatorProviderProfiles';
   const TRANSLATION_ENGINE_LOCAL = 'local';
+  const DETECTION_EXPECTED_LANGUAGES = ['en', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'it', 'pt'];
+  const DETECTION_MIN_CONFIDENCE = 0.65;
+  const DETECTION_MIN_MARGIN = 0.14;
   const TRANSLATION_ENGINE_META = {
     local: {
       id: TRANSLATION_ENGINE_LOCAL,
@@ -2246,6 +2249,73 @@
     return code;
   }
 
+  function normalizeChineseTranslatedPunctuation(text, targetLanguage) {
+    if (!['zh-Hans', 'zh-Hant'].includes(normalizeLang(targetLanguage))) return String(text || '');
+    const han = '\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff';
+    return String(text || '')
+      .replace(new RegExp(`([${han}])\\s*,\\s*`, 'g'), '$1，')
+      .replace(new RegExp(`([${han}])\\s*;\\s*`, 'g'), '$1；')
+      .replace(new RegExp(`([${han}])\\s*:\\s*`, 'g'), '$1：')
+      .replace(new RegExp(`([${han}])\\s*!\\s*(?=\\s|$|[”）】])`, 'g'), '$1！')
+      .replace(new RegExp(`([${han}])\\s*\\?\\s*(?=\\s|$|[”）】])`, 'g'), '$1？')
+      .replace(new RegExp(`([${han}])\\s*\\.\\s*(?=\\s|$|[”）】])`, 'g'), '$1。');
+  }
+
+  function normalizeDetectedLanguage(code) {
+    const value = String(code || '').trim();
+    if (!value) return null;
+    const lower = value.toLowerCase();
+    if (lower === 'zh' || lower === 'zh-hans' || lower.startsWith('zh-cn') || lower.startsWith('zh-sg')) return 'zh-Hans';
+    if (lower === 'zh-hant' || lower.startsWith('zh-tw') || lower.startsWith('zh-hk')) return 'zh-Hant';
+    const base = lower.split('-')[0];
+    return DETECTION_EXPECTED_LANGUAGES.includes(base) ? base : null;
+  }
+
+  function getDocumentLanguageHint() {
+    return normalizeDetectedLanguage(document.documentElement?.lang || '');
+  }
+
+  function getDetectionSamples(text, maxLength = 900) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!value) return [];
+    if (value.length <= maxLength) return [value];
+
+    const offsets = [0, Math.floor((value.length - maxLength) / 2), value.length - maxLength];
+    return [...new Set(offsets.map((offset) => value.slice(offset, offset + maxLength).trim()).filter(Boolean))];
+  }
+
+  function chooseDetectedLanguage(resultGroups) {
+    const scores = new Map();
+    for (const results of resultGroups) {
+      for (const [rank, result] of (Array.isArray(results) ? results.slice(0, 3) : []).entries()) {
+        const language = normalizeDetectedLanguage(result?.detectedLanguage);
+        const confidence = Number(result?.confidence);
+        if (!language || !Number.isFinite(confidence) || confidence <= 0) continue;
+        const rankWeight = rank === 0 ? 1 : rank === 1 ? 0.35 : 0.15;
+        scores.set(language, (scores.get(language) || 0) + confidence * rankWeight);
+      }
+    }
+
+    const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+    const [winner, winnerScore] = ranked[0] || [];
+    const runnerUpScore = ranked[1]?.[1] || 0;
+    const sampleCount = Math.max(1, resultGroups.length);
+    if (!winner) return null;
+    if (winnerScore / sampleCount < DETECTION_MIN_CONFIDENCE) return null;
+    if ((winnerScore - runnerUpScore) / sampleCount < DETECTION_MIN_MARGIN) return null;
+    return winner;
+  }
+
+  function resolveDetectedLanguage(text, resultGroups, options = {}) {
+    const scriptHint = inferLanguageFromText(text);
+    // Kana, Hangul, Cyrillic, and Arabic are reliable visual evidence. CJK alone is not: Japanese can be Kanji-only.
+    if (['ja', 'ko', 'ru', 'ar'].includes(scriptHint)) return scriptHint;
+    const detected = chooseDetectedLanguage(resultGroups);
+    if (detected) return detected;
+    const documentHint = options.documentHint ? getDocumentLanguageHint() : null;
+    return documentHint || scriptHint || null;
+  }
+
   // Get next target language when source and target are the same
   function getNextTargetLanguage(currentLang) {
     const languages = ['zh-Hans', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'it', 'pt', 'zh-Hant'];
@@ -2260,40 +2330,45 @@
   async function detectSourceLanguage(targetLang = null) {
     const text = samplePageText();
     if (!text) return null;
-    const scriptHint = inferLanguageFromText(text);
+    if (['ja', 'ko', 'ru', 'ar'].includes(inferLanguageFromText(text))) return inferLanguageFromText(text);
+
+    let detector = null;
     try {
-      if (typeof window.LanguageDetector === 'undefined') return scriptHint;
-      const detector = await window.LanguageDetector.create({ expectedInputLanguages: ['en','zh-Hans','zh-Hant','ja','ko','fr','de','es','ru','it','pt'] });
-      const results = await detector.detect(text);
-      detector.destroy?.();
-      if (Array.isArray(results) && results.length > 0) {
-        return normalizeLang(results[0].detectedLanguage || scriptHint);
+      if (typeof window.LanguageDetector === 'undefined') return resolveDetectedLanguage(text, [], { documentHint: true });
+      detector = await window.LanguageDetector.create({ expectedInputLanguages: DETECTION_EXPECTED_LANGUAGES });
+      const resultGroups = [];
+      for (const sample of getDetectionSamples(text)) {
+        resultGroups.push(await detector.detect(sample));
       }
+      return resolveDetectedLanguage(text, resultGroups, { documentHint: true });
     } catch (e) {
-      console.warn('Page language detection failed; using script hint:', e);
+      console.warn('Page language detection failed; using script or document hint:', e);
+      return resolveDetectedLanguage(text, [], { documentHint: true });
+    } finally {
+      detector?.destroy?.();
     }
-    return scriptHint;
   }
 
-  // Detect language for selected text
+  // Detect language for selected text. This remains request-local and is never persisted as a global source setting.
   async function detectTextLanguage(text) {
+    if (!text || text.trim().length < 2) return null;
+    if (['ja', 'ko', 'ru', 'ar'].includes(inferLanguageFromText(text))) return inferLanguageFromText(text);
+
+    let detector = null;
     try {
-      if (!isTranslatorAPIAvailable()) return null;
-      if (!text || text.trim().length < 2) return null;
-
-      const detector = await window.LanguageDetector.create({
-        expectedInputLanguages: ['en','zh-Hans','zh-Hant','ja','ko','fr','de','es','ru','it','pt']
-      });
-      const results = await detector.detect(text);
-      detector.destroy?.();
-
-      if (Array.isArray(results) && results.length > 0) {
-        return results[0].detectedLanguage || null;
+      if (!isTranslatorAPIAvailable()) return inferLanguageFromText(text);
+      detector = await window.LanguageDetector.create({ expectedInputLanguages: DETECTION_EXPECTED_LANGUAGES });
+      const resultGroups = [];
+      for (const sample of getDetectionSamples(text)) {
+        resultGroups.push(await detector.detect(sample));
       }
+      return resolveDetectedLanguage(text, resultGroups);
     } catch (e) {
-      console.warn('Language detection failed:', e);
+      console.warn('Language detection failed; using script hint:', e);
+      return inferLanguageFromText(text);
+    } finally {
+      detector?.destroy?.();
     }
-    return null;
   }
 
   async function ensureTranslator(sourceLang, targetLang) {
@@ -2361,6 +2436,7 @@
       translation = await engine.translate(text);
     }
 
+    translation = normalizeChineseTranslatedPunctuation(translation, targetLang);
     await writeTranslationCache(text, sourceLang, targetLang, engineId, translation, providerId, providerProfileKey);
     return translation;
   }
