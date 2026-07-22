@@ -34,7 +34,7 @@ This pass improves recoverability, reading usability, and local provider-credent
 - **Consistency:** reader retranslation now applies the same conservative Chinese punctuation normalization used by the manual and content-script paths.
 - **Links:** Markdown external `https:`, `http:`, and `mailto:` links are retained for headings, paragraphs, list items, quotes, and simple table cells. Image syntax and internal anchors remain plain text; unsafe URL schemes are rejected before they reach the reader.
 - **Static evidence:** `popup.js`, `reader.js`, and `i18n.js` syntax checks, both locale JSON parse checks, `git diff --check`, a file-extracted six-block Markdown parser sample, and draft/pending-engine wiring checks passed.
-- **Live acceptance passed by user on 2026-07-22:** the smoke Markdown file preserved headings, paragraphs, ordered/unordered lists, quotes, tables, code, and bilingual layout in the reader. Refresh did not repeat automatic translation, and imported external links opened through the existing link-choice flow. Code blocks appear twice with identical source and translation text in bilingual mode; this is a cosmetic follow-up, not a functional blocker.
+- **Live acceptance passed by user on 2026-07-22:** the smoke Markdown file preserved headings, paragraphs, ordered/unordered lists, quotes, tables, code, and bilingual layout in the reader. Refresh did not repeat automatic translation, and imported external links opened through the existing link-choice flow. The later reader polish collapses identical code source/translation pairs to one block in dual mode while keeping source-only and translated-only modes explicit.
 
 ## Pause checkpoint — 2026-07-21
 

@@ -319,16 +319,19 @@ function renderStructuredBlock(block) {
   if (type === 'code') {
     const section = document.createElement('section');
     section.className = 'reader-structure-block reader-block-code';
+    const sourceText = block.sourceText || '';
+    const translatedText = block.translatedText || sourceText;
+    const isDuplicateInDualMode = state.mode === 'dual' && normalizeText(sourceText) === normalizeText(translatedText);
     if (state.mode !== 'translated') {
       const source = document.createElement('pre');
       source.className = 'reader-source';
-      source.textContent = block.sourceText || '';
+      source.textContent = sourceText;
       section.appendChild(source);
     }
-    if (state.mode !== 'source') {
+    if (state.mode !== 'source' && !isDuplicateInDualMode) {
       const translated = document.createElement('pre');
       translated.className = 'reader-translated';
-      translated.textContent = block.translatedText || block.sourceText || '';
+      translated.textContent = translatedText;
       section.appendChild(translated);
     }
     return section;

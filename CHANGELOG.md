@@ -16,6 +16,7 @@ All notable user-visible changes are recorded here. Dates use local workspace ti
 ### Fixed
 
 - Webpage structured reading retains same-page reference targets such as `[1]` instead of silently dropping them during link extraction, so the reader can use its existing citation jump flow.
+- In dual-language reading mode, code blocks whose translated text is identical to their source now render once instead of as duplicate blocks. Source-only and translated-only modes remain unchanged.
 
 ### Safety
 
